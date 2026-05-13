@@ -1,0 +1,21 @@
+kind = "web"
+previewPath = "/"
+title = "KCEA Website"
+version = "1.0.0"
+id = "artifacts/kcea-website"
+
+[[integratedSkills]]
+name = "react-vite"
+version = "1.0.0"
+
+[[services]]
+localPort = 8082
+name = "KCEA Website"
+paths = ["/"]
+
+[services.env]
+PORT = "8082"
+BASE_PATH = "/"
+
+[services.development]
+run = "pnpm --filter @workspace/kcea-website run dev"

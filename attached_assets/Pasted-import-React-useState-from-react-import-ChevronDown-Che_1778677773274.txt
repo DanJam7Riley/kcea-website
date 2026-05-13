@@ -1,0 +1,430 @@
+import React, { useState } from 'react';
+import { ChevronDown, Check, AlertCircle, Mail, MapPin, Phone, TrendingUp } from 'lucide-react';
+
+export default function KCEAWebsite() {
+  const [openFAQ, setOpenFAQ] = useState(null);
+  const [formData, setFormData] = useState({
+    name: '',
+    street: '',
+    address: '',
+    phone: '',
+    email: '',
+    commitment: 'monthly',
+  });
+  const [newsletterEmail, setNewsletterEmail] = useState('');
+  const [formSubmitted, setFormSubmitted] = useState(false);
+
+  const handleFormChange = (e) => {
+    setFormData({ ...formData, [e.target.name]: e.target.value });
+  };
+
+  const handleFormSubmit = (e) => {
+    e.preventDefault();
+    // In production, replace this with actual Formspree endpoint
+    alert('Thank you! Your commitment has been recorded. We will contact you shortly.');
+    setFormSubmitted(true);
+    setTimeout(() => setFormSubmitted(false), 3000);
+    setFormData({ name: '', street: '', address: '', phone: '', email: '', commitment: 'monthly' });
+  };
+
+  const handleNewsletterSubmit = (e) => {
+    e.preventDefault();
+    alert(`Newsletter signup email sent. You'll receive updates to: ${newsletterEmail}`);
+    setNewsletterEmail('');
+  };
+
+  const streets = [
+    { name: 'Derby', captain: 'Carina', forms: 27, status: 'Strong' },
+    { name: 'Orion', captain: 'Ingrid', forms: 18, status: 'Good' },
+    { name: 'Protea', captain: 'Priscilla', forms: 17, status: 'Good' },
+    { name: 'Osprey', captain: 'Jo-Anne', forms: 15, status: 'Solid' },
+    { name: 'Ocean', captain: 'Geoff', forms: 12, status: 'In Progress' },
+    { name: 'Onyx', captain: 'Maria D\'Alves', forms: 12, status: 'Good' },
+    { name: 'Westmoreland', captain: 'Assigned', forms: 13, status: 'Steady' },
+    { name: 'Nymphe', captain: 'Maria D\'Alves', forms: 9, status: 'In Progress' },
+    { name: 'Nottingham', captain: 'Kerstin', forms: 8, status: 'In Progress' },
+    { name: 'Highlands', captain: 'Assigned', forms: 10, status: 'Good' },
+    { name: 'Panther', captain: 'Paul Arokiam', forms: 6, status: 'Re-engaged' },
+    { name: 'Mildura', captain: 'Garren (Feroze assist)', forms: 0, status: 'Critical' },
+  ];
+
+  const faqs = [
+    {
+      q: 'What is the KCEA enclosure project?',
+      a: 'The Kensington Central Enclosure Association is a resident-led community safety project. We are installing a secure boundary with controlled access points around our neighbourhood to reduce crime and improve safety. It\'s not cameras alone — it\'s full infrastructure with armed response integration.'
+    },
+    {
+      q: 'How much does it cost per household?',
+      a: 'R250 per month or R3,000 as a once-off payment. This covers consultant fees, council application, traffic impact study, and eventually gate infrastructure, monitoring, and armed response services.'
+    },
+    {
+      q: 'How many households have committed so far?',
+      a: 'As of May 6, 2026, we have 178 households committed. We need approximately 680+ total to fully fund Phase 1 and the infrastructure. Every commitment brings us closer to approval.'
+    },
+    {
+      q: 'What is the timeline for the enclosure to be built?',
+      a: 'Phase 1 (consultant + application): 4–6 months with R200,000 in funding. Phase 2 (full funding): 3–6 months. Phase 3 (installation): 2–3 months. Council approval is valid for 4 years.'
+    },
+    {
+      q: 'How does the application process work?',
+      a: 'We\'ve hired Stephen Margo, a security consultant with 100% success rate. He handles the traffic impact study, council application via the JRA, and ensures compliance with CoJ Security Access Restriction Policy 2018. We already have 75% resident consent (required threshold: 67%).'
+    },
+    {
+      q: 'Will the enclosure close all streets?',
+      a: 'No. A traffic impact study (required by Council) will determine which roads can be closed and which stay open. School bus routes (Derby Road), Pikitup access, and emergency vehicles are all part of the design. It\'s not a total lockdown.'
+    },
+    {
+      q: 'Can I pay monthly or as a lump sum?',
+      a: 'Both! You can commit R250/month ongoing, or pay R3,000 upfront. Bank details are on the payments page. Include your name and street in the payment reference so we can track your commitment.'
+    },
+    {
+      q: 'What if I don\'t want to commit financially?',
+      a: 'Every resident benefits from the enclosure once it\'s built. If you have concerns or questions before committing, reach out — we want to address your concerns. Even if you can\'t contribute now, staying informed helps.'
+    },
+    {
+      q: 'Is there a street captain for my street?',
+      a: 'Check the Street Captains page. If your street isn\'t listed, contact us — we\'re recruiting captains for all remaining streets. Street captains collect forms, answer questions, and represent their street at meetings.'
+    },
+    {
+      q: 'How do I know my payment was received?',
+      a: 'Send your payment with your name and street in the reference line. Email us confirmation at kcea.kensington@gmail.com (or your designated contact) with a screenshot of the transfer. We\'ll confirm receipt and update our records.'
+    },
+  ];
+
+  const fundingProgress = (178 * 250) / 200000;
+  const monthlyIncome = 178 * 250;
+
+  return (
+    <div className="min-h-screen bg-gradient-to-b from-[#1A1A2E] to-[#16213E] text-white">
+      {/* HEADER/HERO */}
+      <div className="bg-gradient-to-r from-[#0F3460] to-[#16213E] border-b border-[#C9A84C]/25 sticky top-0 z-50 shadow-lg">
+        <div className="max-w-6xl mx-auto px-6 py-4 flex justify-between items-center">
+          <div className="text-2xl font-bold text-[#E8C97A]">KCEA</div>
+          <nav className="hidden md:flex gap-8 text-sm">
+            <a href="#project" className="hover:text-[#C9A84C] transition">Project</a>
+            <a href="#commit" className="hover:text-[#C9A84C] transition">Commit</a>
+            <a href="#progress" className="hover:text-[#C9A84C] transition">Progress</a>
+            <a href="#captains" className="hover:text-[#C9A84C] transition">Captains</a>
+            <a href="#faq" className="hover:text-[#C9A84C] transition">FAQ</a>
+          </nav>
+        </div>
+      </div>
+
+      {/* HERO SECTION */}
+      <section id="project" className="max-w-6xl mx-auto px-6 py-16">
+        <div className="grid md:grid-cols-2 gap-12 items-center">
+          <div>
+            <div className="inline-block bg-[#E94560] text-white text-xs font-bold letter-spacing px-4 py-2 rounded-full mb-4">
+              PHASE 2 — ACTIVE
+            </div>
+            <h1 className="text-5xl font-bold text-[#E8C97A] mb-4 leading-tight">Kensington Central Enclosure</h1>
+            <p className="text-[#9999BB] text-lg mb-6">A resident-led community safety project. 178 households committed. Building a safer neighbourhood together.</p>
+            <div className="space-y-3 text-sm text-[#9999BB]">
+              <div className="flex items-center gap-2"><Check className="text-green-400" size={20} /> <strong>75% consent</strong> achieved</div>
+              <div className="flex items-center gap-2"><TrendingUp className="text-[#C9A84C]" size={20} /> <strong>R44,500/month</strong> current funding</div>
+              <div className="flex items-center gap-2"><AlertCircle className="text-[#C9A84C]" size={20} /> <strong>Phase 1 target:</strong> R200,000</div>
+            </div>
+          </div>
+          <div className="bg-[#0F3460] border border-[#C9A84C]/25 rounded-lg p-8">
+            <h3 className="text-[#E8C97A] font-bold text-lg mb-6">What We're Building</h3>
+            <ul className="space-y-4 text-sm text-[#9999BB]">
+              <li className="flex gap-3"><Check className="text-green-400 flex-shrink-0" size={20} /> <span><strong>Secure boundary</strong> with controlled access gates</span></li>
+              <li className="flex gap-3"><Check className="text-green-400 flex-shrink-0" size={20} /> <span><strong>LPR cameras</strong> at all entry points (Murphy network)</span></li>
+              <li className="flex gap-3"><Check className="text-green-400 flex-shrink-0" size={20} /> <span><strong>Armed response</strong> integration for residents</span></li>
+              <li className="flex gap-3"><Check className="text-green-400 flex-shrink-0" size={20} /> <span><strong>Traffic study</strong> ensuring essential access (buses, Pikitup, emergency)</span></li>
+              <li className="flex gap-3"><Check className="text-green-400 flex-shrink-0" size={20} /> <span><strong>Council approval</strong> under CoJ Security Access Restriction Policy 2018</span></li>
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      {/* COMMITMENT FORM */}
+      <section id="commit" className="bg-[#0F3460]/30 border-y border-[#C9A84C]/25 py-16">
+        <div className="max-w-6xl mx-auto px-6">
+          <h2 className="text-4xl font-bold text-[#E8C97A] mb-12">Join Us — Make Your Commitment</h2>
+          <div className="grid md:grid-cols-2 gap-12">
+            {/* FORM */}
+            <div className="bg-[#0F3460] border border-[#C9A84C]/25 rounded-lg p-8">
+              <form onSubmit={handleFormSubmit} className="space-y-4">
+                <div>
+                  <label className="block text-[#C9A84C] text-sm font-bold mb-2">Full Name *</label>
+                  <input
+                    type="text"
+                    name="name"
+                    value={formData.name}
+                    onChange={handleFormChange}
+                    required
+                    className="w-full bg-[#1A1A2E] border border-[#C9A84C]/25 rounded px-4 py-2 text-white placeholder-[#9999BB]"
+                    placeholder="Your full name"
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-[#C9A84C] text-sm font-bold mb-2">Street *</label>
+                    <input
+                      type="text"
+                      name="street"
+                      value={formData.street}
+                      onChange={handleFormChange}
+                      required
+                      className="w-full bg-[#1A1A2E] border border-[#C9A84C]/25 rounded px-4 py-2 text-white placeholder-[#9999BB]"
+                      placeholder="e.g. Derby Road"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[#C9A84C] text-sm font-bold mb-2">House Number *</label>
+                    <input
+                      type="text"
+                      name="address"
+                      value={formData.address}
+                      onChange={handleFormChange}
+                      required
+                      className="w-full bg-[#1A1A2E] border border-[#C9A84C]/25 rounded px-4 py-2 text-white placeholder-[#9999BB]"
+                      placeholder="e.g. 42"
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-[#C9A84C] text-sm font-bold mb-2">Email Address *</label>
+                  <input
+                    type="email"
+                    name="email"
+                    value={formData.email}
+                    onChange={handleFormChange}
+                    required
+                    className="w-full bg-[#1A1A2E] border border-[#C9A84C]/25 rounded px-4 py-2 text-white placeholder-[#9999BB]"
+                    placeholder="you@example.com"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[#C9A84C] text-sm font-bold mb-2">Phone Number *</label>
+                  <input
+                    type="tel"
+                    name="phone"
+                    value={formData.phone}
+                    onChange={handleFormChange}
+                    required
+                    className="w-full bg-[#1A1A2E] border border-[#C9A84C]/25 rounded px-4 py-2 text-white placeholder-[#9999BB]"
+                    placeholder="+27 123 456 7890"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[#C9A84C] text-sm font-bold mb-2">I Commit To *</label>
+                  <select
+                    name="commitment"
+                    value={formData.commitment}
+                    onChange={handleFormChange}
+                    className="w-full bg-[#1A1A2E] border border-[#C9A84C]/25 rounded px-4 py-2 text-white"
+                  >
+                    <option value="monthly">R250 per month (ongoing)</option>
+                    <option value="onceoff">R3,000 once-off payment</option>
+                    <option value="both">Both monthly + upfront R3,000</option>
+                  </select>
+                </div>
+                <button
+                  type="submit"
+                  className="w-full bg-gradient-to-r from-[#C9A84C] to-[#E8C97A] text-[#1A1A2E] font-bold py-3 rounded hover:shadow-lg transition"
+                >
+                  Submit Commitment
+                </button>
+                {formSubmitted && (
+                  <div className="bg-green-500/20 border border-green-500 text-green-400 text-sm p-3 rounded">
+                    ✓ Thank you! We've recorded your commitment.
+                  </div>
+                )}
+              </form>
+            </div>
+
+            {/* PAYMENT INFO */}
+            <div className="space-y-6">
+              <div className="bg-[#0F3460] border border-[#C9A84C]/25 rounded-lg p-8">
+                <h3 className="text-[#E8C97A] font-bold text-lg mb-4">Payment Details</h3>
+                <p className="text-[#9999BB] text-sm mb-6">Once you submit the form above, transfer your commitment amount to:</p>
+                <div className="bg-[#1A1A2E] rounded p-4 space-y-2 font-mono text-sm text-[#C9A84C] mb-4">
+                  <div><strong>Account Holder:</strong> KCEA (Kensington Central Enclosure)</div>
+                  <div><strong>Bank:</strong> [Your Bank Name]</div>
+                  <div><strong>Account Number:</strong> [Account #]</div>
+                  <div><strong>Branch Code:</strong> [Branch Code]</div>
+                </div>
+                <p className="text-[#9999BB] text-xs"><strong>Important:</strong> In the payment reference, please write: "<strong>[Your Name] - [Street Name]</strong>" so we can match your payment to your commitment.</p>
+              </div>
+
+              <div className="bg-[#0F3460] border border-[#C9A84C]/25 rounded-lg p-8">
+                <h3 className="text-[#E8C97A] font-bold text-lg mb-4">Confirm Your Payment</h3>
+                <p className="text-[#9999BB] text-sm mb-4">After you transfer, send us confirmation:</p>
+                <a
+                  href="mailto:kcea.kensington@gmail.com"
+                  className="inline-flex items-center gap-2 bg-[#E94560] text-white px-4 py-2 rounded hover:bg-opacity-90 transition text-sm font-bold"
+                >
+                  <Mail size={16} /> Email Proof of Payment
+                </a>
+                <p className="text-[#9999BB] text-xs mt-4">Include a screenshot of the transfer. We'll confirm receipt and add you to our records.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* PROGRESS SECTION */}
+      <section id="progress" className="max-w-6xl mx-auto px-6 py-16">
+        <h2 className="text-4xl font-bold text-[#E8C97A] mb-12">Project Progress</h2>
+        <div className="grid md:grid-cols-3 gap-8 mb-12">
+          <div className="bg-[#0F3460] border border-[#C9A84C]/25 rounded-lg p-8 text-center">
+            <div className="text-5xl font-bold text-[#E8C97A] mb-2">178</div>
+            <div className="text-[#9999BB]">Households Committed</div>
+            <p className="text-xs text-[#9999BB] mt-2">Target: 680+</p>
+          </div>
+          <div className="bg-[#0F3460] border border-[#C9A84C]/25 rounded-lg p-8 text-center">
+            <div className="text-5xl font-bold text-[#E8C97A] mb-2">R44,500</div>
+            <div className="text-[#9999BB]">Monthly Income (Current)</div>
+            <p className="text-xs text-[#9999BB] mt-2">@ R250/household</p>
+          </div>
+          <div className="bg-[#0F3460] border border-[#C9A84C]/25 rounded-lg p-8 text-center">
+            <div className="text-5xl font-bold text-[#E8C97A] mb-2">R200k</div>
+            <div className="text-[#9999BB]">Phase 1 Target</div>
+            <p className="text-xs text-[#9999BB] mt-2">Consultant + Application</p>
+          </div>
+        </div>
+
+        {/* PROGRESS BAR */}
+        <div className="bg-[#0F3460] border border-[#C9A84C]/25 rounded-lg p-8 mb-12">
+          <div className="flex justify-between items-center mb-4">
+            <h3 className="text-[#E8C97A] font-bold">Phase 1 Funding Progress</h3>
+            <div className="text-[#C9A84C] font-bold">{(fundingProgress * 100).toFixed(0)}%</div>
+          </div>
+          <div className="w-full bg-[#1A1A2E] rounded-full h-4 overflow-hidden">
+            <div
+              className="h-full bg-gradient-to-r from-[#C9A84C] to-[#E8C97A]"
+              style={{ width: `${Math.min(fundingProgress * 100, 100)}%` }}
+            />
+          </div>
+          <p className="text-[#9999BB] text-sm mt-4">
+            At current rate (R44,500/month): ~4–5 months to Phase 1 goal
+          </p>
+        </div>
+
+        {/* TIMELINE */}
+        <h3 className="text-[#E8C97A] font-bold text-xl mb-6">Project Timeline</h3>
+        <div className="space-y-4">
+          {[
+            { phase: 'Phase 1', timeline: 'Now – 4–5 months', goal: 'Raise R200k, engage consultant, submit Council application' },
+            { phase: 'Phase 2', timeline: '5–8 months', goal: 'Council approval + fundraise remaining R1.8m' },
+            { phase: 'Phase 3', timeline: '8–11 months', goal: 'Install gates, cameras, armed response – Go live' },
+          ].map((item, i) => (
+            <div key={i} className="bg-[#0F3460] border border-[#C9A84C]/25 rounded p-4">
+              <div className="flex justify-between items-start">
+                <div>
+                  <div className="text-[#C9A84C] font-bold">{item.phase}</div>
+                  <p className="text-[#9999BB] text-sm">{item.goal}</p>
+                </div>
+                <div className="text-[#C9A84C] text-sm font-bold">{item.timeline}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      {/* STREET CAPTAINS */}
+      <section id="captains" className="bg-[#0F3460]/30 border-y border-[#C9A84C]/25 py-16">
+        <div className="max-w-6xl mx-auto px-6">
+          <h2 className="text-4xl font-bold text-[#E8C97A] mb-4">Street Captain Network</h2>
+          <p className="text-[#9999BB] mb-8">Each street has a volunteer captain. If your street isn't listed, contact us to volunteer.</p>
+          <div className="grid md:grid-cols-2 gap-4">
+            {streets.map((street, i) => (
+              <div key={i} className="bg-[#0F3460] border border-[#C9A84C]/25 rounded p-4 flex justify-between items-center">
+                <div>
+                  <div className="font-bold text-white">{street.name}</div>
+                  <div className="text-sm text-[#9999BB]">Captain: {street.captain}</div>
+                </div>
+                <div className="text-right">
+                  <div className="text-[#C9A84C] font-bold">{street.forms}</div>
+                  <div className="text-xs text-[#9999BB]">{street.status}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* NEWSLETTER */}
+      <section className="max-w-6xl mx-auto px-6 py-16">
+        <div className="bg-gradient-to-r from-[#0F3460] to-[#16213E] border border-[#C9A84C]/25 rounded-lg p-12">
+          <h2 className="text-3xl font-bold text-[#E8C97A] mb-2">Get Updates</h2>
+          <p className="text-[#9999BB] mb-6">Subscribe to our newsletter for monthly progress updates, meeting summaries, and funding milestones.</p>
+          <form onSubmit={handleNewsletterSubmit} className="flex gap-3 max-w-md">
+            <input
+              type="email"
+              value={newsletterEmail}
+              onChange={(e) => setNewsletterEmail(e.target.value)}
+              required
+              placeholder="your@email.com"
+              className="flex-1 bg-[#1A1A2E] border border-[#C9A84C]/25 rounded px-4 py-3 text-white placeholder-[#9999BB]"
+            />
+            <button
+              type="submit"
+              className="bg-gradient-to-r from-[#C9A84C] to-[#E8C97A] text-[#1A1A2E] px-6 py-3 rounded font-bold hover:shadow-lg transition"
+            >
+              Subscribe
+            </button>
+          </form>
+        </div>
+      </section>
+
+      {/* FAQ */}
+      <section id="faq" className="bg-[#0F3460]/30 border-y border-[#C9A84C]/25 py-16">
+        <div className="max-w-4xl mx-auto px-6">
+          <h2 className="text-4xl font-bold text-[#E8C97A] mb-12">Frequently Asked Questions</h2>
+          <div className="space-y-3">
+            {faqs.map((faq, i) => (
+              <div key={i} className="bg-[#0F3460] border border-[#C9A84C]/25 rounded">
+                <button
+                  onClick={() => setOpenFAQ(openFAQ === i ? null : i)}
+                  className="w-full flex justify-between items-center p-4 hover:bg-[#0F3460]/50 transition"
+                >
+                  <h3 className="text-[#E8C97A] font-bold text-left">{faq.q}</h3>
+                  <ChevronDown
+                    size={20}
+                    className={`text-[#C9A84C] transition ${openFAQ === i ? 'rotate-180' : ''}`}
+                  />
+                </button>
+                {openFAQ === i && (
+                  <div className="px-4 pb-4 text-[#9999BB] text-sm border-t border-[#C9A84C]/25 pt-4">
+                    {faq.a}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* CONTACT */}
+      <section className="max-w-6xl mx-auto px-6 py-16">
+        <h2 className="text-4xl font-bold text-[#E8C97A] mb-12">Get In Touch</h2>
+        <div className="grid md:grid-cols-3 gap-8">
+          <div className="bg-[#0F3460] border border-[#C9A84C]/25 rounded-lg p-8 text-center">
+            <Mail className="text-[#C9A84C] mx-auto mb-4" size={32} />
+            <h3 className="text-[#E8C97A] font-bold mb-2">Email</h3>
+            <p className="text-[#9999BB] text-sm">kcea.kensington@gmail.com</p>
+          </div>
+          <div className="bg-[#0F3460] border border-[#C9A84C]/25 rounded-lg p-8 text-center">
+            <MapPin className="text-[#C9A84C] mx-auto mb-4" size={32} />
+            <h3 className="text-[#E8C97A] font-bold mb-2">Meetings</h3>
+            <p className="text-[#9999BB] text-sm">5 Osprey Street<br />Kensington, Joburg</p>
+          </div>
+          <div className="bg-[#0F3460] border border-[#C9A84C]/25 rounded-lg p-8 text-center">
+            <Phone className="text-[#C9A84C] mx-auto mb-4" size={32} />
+            <h3 className="text-[#E8C97A] font-bold mb-2">Consultant</h3>
+            <p className="text-[#9999BB] text-sm">Stephen Margo<br />076 030 2342</p>
+          </div>
+        </div>
+      </section>
+
+      {/* FOOTER */}
+      <footer className="bg-[#0F3460] border-t border-[#C9A84C]/25 py-8 text-center text-[#9999BB] text-sm">
+        <p>Kensington Central Enclosure Association © 2026</p>
+        <p className="mt-2">Confidential Community Safety Project</p>
+      </footer>
+    </div>
+  );
+}
