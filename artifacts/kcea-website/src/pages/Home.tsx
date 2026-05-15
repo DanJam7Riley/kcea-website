@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { motion } from "framer-motion";
+import { useQuery } from "@tanstack/react-query";
 import { 
   ChevronDown, Check, AlertCircle, Mail, MapPin, Phone, 
   TrendingUp, Shield, Users, Menu, X 
@@ -14,19 +15,43 @@ import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 
-const streetsData = [
-  { name: "Derby", captain: "Carina", forms: 27, status: "Strong" },
-  { name: "Orion", captain: "Ingrid", forms: 18, status: "Good" },
-  { name: "Protea", captain: "Priscilla", forms: 17, status: "Good" },
-  { name: "Osprey", captain: "Jo-Anne", forms: 15, status: "Solid" },
-  { name: "Ocean", captain: "Geoff", forms: 12, status: "In Progress" },
-  { name: "Onyx", captain: "Maria D'Alves", forms: 12, status: "Good" },
-  { name: "Westmoreland", captain: "Assigned", forms: 13, status: "Steady" },
-  { name: "Nymphe", captain: "Maria D'Alves", forms: 9, status: "In Progress" },
-  { name: "Nottingham", captain: "Kerstin", forms: 8, status: "In Progress" },
-  { name: "Highlands", captain: "Assigned", forms: 10, status: "Good" },
-  { name: "Panther", captain: "Paul Arokiam", forms: 6, status: "Re-engaged" },
-  { name: "Mildura", captain: "Garren (Feroze assist)", forms: 0, status: "Critical" },
+const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
+
+interface SiteStats {
+  committedHouseholds: number;
+  monthlyContributions: number;
+  targetHouseholds: number;
+  fundingPercent: number;
+}
+
+interface StreetCaptain {
+  id: number;
+  street: string;
+  captain: string;
+  forms: number;
+  status: string;
+}
+
+const DEFAULT_STATS: SiteStats = {
+  committedHouseholds: 178,
+  monthlyContributions: 44500,
+  targetHouseholds: 680,
+  fundingPercent: 22,
+};
+
+const DEFAULT_CAPTAINS: StreetCaptain[] = [
+  { id: 1, street: "Derby", captain: "Carina", forms: 27, status: "Strong" },
+  { id: 2, street: "Orion", captain: "Ingrid", forms: 18, status: "Good" },
+  { id: 3, street: "Protea", captain: "Priscilla", forms: 17, status: "Good" },
+  { id: 4, street: "Osprey", captain: "Jo-Anne", forms: 15, status: "Solid" },
+  { id: 5, street: "Ocean", captain: "Geoff", forms: 12, status: "In Progress" },
+  { id: 6, street: "Onyx", captain: "Maria D'Alves", forms: 12, status: "Good" },
+  { id: 7, street: "Westmoreland", captain: "Assigned", forms: 13, status: "Steady" },
+  { id: 8, street: "Nymphe", captain: "Maria D'Alves", forms: 9, status: "In Progress" },
+  { id: 9, street: "Nottingham", captain: "Kerstin", forms: 8, status: "In Progress" },
+  { id: 10, street: "Highlands", captain: "Assigned", forms: 10, status: "Good" },
+  { id: 11, street: "Panther", captain: "Paul Arokiam", forms: 6, status: "Re-engaged" },
+  { id: 12, street: "Mildura", captain: "Garren (Feroze assist)", forms: 0, status: "Critical" },
 ];
 
 const faqs = [
@@ -47,6 +72,18 @@ export default function Home() {
   const [formSubmitted, setFormSubmitted] = useState(false);
   const [newsletterSubmitted, setNewsletterSubmitted] = useState(false);
   const { toast } = useToast();
+
+  const { data: stats = DEFAULT_STATS } = useQuery<SiteStats>({
+    queryKey: ["stats"],
+    queryFn: () => fetch(`${BASE}/api/stats`).then(r => r.json()),
+    staleTime: 30_000,
+  });
+
+  const { data: captains = DEFAULT_CAPTAINS } = useQuery<StreetCaptain[]>({
+    queryKey: ["captains"],
+    queryFn: () => fetch(`${BASE}/api/captains`).then(r => r.json()),
+    staleTime: 30_000,
+  });
 
   const handleFormSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -80,6 +117,11 @@ export default function Home() {
       el.scrollIntoView({ behavior: 'smooth' });
       setIsMobileMenuOpen(false);
     }
+  };
+
+  const fmtRand = (n: number) => {
+    if (n >= 1000) return `R${(n / 1000).toFixed(n % 1000 === 0 ? 0 : 1)}k`;
+    return `R${n.toLocaleString()}`;
   };
 
   return (
@@ -145,7 +187,7 @@ export default function Home() {
             </div>
             <div className="flex items-center gap-8 pt-8 border-t border-border">
               <div>
-                <p className="text-3xl font-bold text-foreground">178</p>
+                <p className="text-3xl font-bold text-foreground">{stats.committedHouseholds}</p>
                 <p className="text-sm text-muted-foreground">Households</p>
               </div>
               <div>
@@ -188,21 +230,21 @@ export default function Home() {
         <section id="progress" className="space-y-12">
           <div className="text-center space-y-4 max-w-2xl mx-auto">
             <h2 className="text-3xl md:text-4xl font-bold">Project Progress</h2>
-            <p className="text-muted-foreground">We need approximately 680+ households to fully fund Phase 1 and the infrastructure. Every commitment brings us closer.</p>
+            <p className="text-muted-foreground">We need approximately {stats.targetHouseholds}+ households to fully fund Phase 1 and the infrastructure. Every commitment brings us closer.</p>
           </div>
 
           <div className="grid md:grid-cols-3 gap-6">
             <Card className="bg-card border-card-border">
               <CardContent className="p-6 flex flex-col items-center text-center space-y-2">
                 <Users className="h-8 w-8 text-primary mb-2" />
-                <h4 className="text-3xl font-bold">178</h4>
+                <h4 className="text-3xl font-bold">{stats.committedHouseholds}</h4>
                 <p className="text-sm text-muted-foreground">Committed Households</p>
               </CardContent>
             </Card>
             <Card className="bg-card border-card-border relative overflow-hidden">
               <CardContent className="p-6 flex flex-col items-center text-center space-y-2">
                 <TrendingUp className="h-8 w-8 text-primary mb-2" />
-                <h4 className="text-3xl font-bold">R44,500</h4>
+                <h4 className="text-3xl font-bold">{fmtRand(stats.monthlyContributions)}</h4>
                 <p className="text-sm text-muted-foreground">Monthly Contributions</p>
               </CardContent>
             </Card>
@@ -222,14 +264,14 @@ export default function Home() {
                   <h3 className="text-xl font-bold">Phase 1 Funding</h3>
                   <p className="text-sm text-muted-foreground">Consultant & Application Fees</p>
                 </div>
-                <span className="text-2xl font-bold text-primary">22%</span>
+                <span className="text-2xl font-bold text-primary">{stats.fundingPercent}%</span>
               </div>
               <motion.div
                 initial={{ width: 0 }}
                 whileInView={{ width: "100%" }}
                 viewport={{ once: true }}
               >
-                <Progress value={22} className="h-3 bg-background" data-testid="progress-funding" />
+                <Progress value={stats.fundingPercent} className="h-3 bg-background" data-testid="progress-funding" />
               </motion.div>
               
               <div className="grid md:grid-cols-3 gap-8 pt-8">
@@ -257,7 +299,7 @@ export default function Home() {
         <section id="commit" className="space-y-12">
           <div className="text-center space-y-4 max-w-2xl mx-auto">
             <h2 className="text-3xl md:text-4xl font-bold">Make Your Commitment</h2>
-            <p className="text-muted-foreground">Join 178 of your neighbours. We offer both monthly and once-off contribution options.</p>
+            <p className="text-muted-foreground">Join {stats.committedHouseholds} of your neighbours. We offer both monthly and once-off contribution options.</p>
           </div>
 
           <div className="grid lg:grid-cols-5 gap-8">
@@ -370,9 +412,9 @@ export default function Home() {
           </div>
 
           <div className="grid sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-            {streetsData.map((street, i) => (
+            {captains.map((street, i) => (
               <motion.div
-                key={street.name}
+                key={street.street}
                 initial={{ opacity: 0, y: 10 }}
                 whileInView={{ opacity: 1, y: 0 }}
                 viewport={{ once: true }}
@@ -381,14 +423,14 @@ export default function Home() {
                 <Card className="bg-card border-card-border h-full">
                   <CardContent className="p-5 flex flex-col h-full justify-between gap-4">
                     <div className="space-y-1">
-                      <h4 className="font-bold text-lg">{street.name}</h4>
+                      <h4 className="font-bold text-lg">{street.street}</h4>
                       <p className="text-sm text-muted-foreground flex items-center gap-1">
                         <Users className="h-3 w-3" /> {street.captain}
                       </p>
                     </div>
                     <div className="flex items-center justify-between mt-auto">
                       <span className="text-sm font-medium">{street.forms} forms</span>
-                      <Badge className={getStatusColor(street.status)} variant="secondary" data-testid={`badge-status-${street.name}`}>
+                      <Badge className={getStatusColor(street.status)} variant="secondary" data-testid={`badge-status-${street.street}`}>
                         {street.status}
                       </Badge>
                     </div>

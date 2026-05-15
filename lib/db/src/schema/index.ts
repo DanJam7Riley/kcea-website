@@ -1,20 +1,29 @@
-// Export your models here. Add one export per file
-// export * from "./posts";
-//
-// Each model/table should ideally be split into different files.
-// Each model/table should define a Drizzle table, insert schema, and types:
-//
-//   import { pgTable, text, serial } from "drizzle-orm/pg-core";
-//   import { createInsertSchema } from "drizzle-zod";
-//   import { z } from "zod/v4";
-//
-//   export const postsTable = pgTable("posts", {
-//     id: serial("id").primaryKey(),
-//     title: text("title").notNull(),
-//   });
-//
-//   export const insertPostSchema = createInsertSchema(postsTable).omit({ id: true });
-//   export type InsertPost = z.infer<typeof insertPostSchema>;
-//   export type Post = typeof postsTable.$inferSelect;
+import { pgTable, serial, integer, text, timestamp } from "drizzle-orm/pg-core";
+import { createInsertSchema } from "drizzle-zod";
+import { z } from "zod/v4";
 
-export {}
+export const siteStatsTable = pgTable("site_stats", {
+  id: serial("id").primaryKey(),
+  committedHouseholds: integer("committed_households").notNull().default(178),
+  monthlyContributions: integer("monthly_contributions").notNull().default(44500),
+  targetHouseholds: integer("target_households").notNull().default(680),
+  fundingPercent: integer("funding_percent").notNull().default(22),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export const streetCaptainsTable = pgTable("street_captains", {
+  id: serial("id").primaryKey(),
+  street: text("street").notNull().unique(),
+  captain: text("captain").notNull(),
+  forms: integer("forms").notNull().default(0),
+  status: text("status").notNull(),
+});
+
+export const insertSiteStatsSchema = createInsertSchema(siteStatsTable).omit({ id: true, updatedAt: true });
+export const updateSiteStatsSchema = insertSiteStatsSchema.partial();
+export type SiteStats = typeof siteStatsTable.$inferSelect;
+
+export const insertStreetCaptainSchema = createInsertSchema(streetCaptainsTable).omit({ id: true });
+export const updateStreetCaptainSchema = insertStreetCaptainSchema.partial();
+export type StreetCaptain = typeof streetCaptainsTable.$inferSelect;
+export type InsertStreetCaptain = z.infer<typeof insertStreetCaptainSchema>;
