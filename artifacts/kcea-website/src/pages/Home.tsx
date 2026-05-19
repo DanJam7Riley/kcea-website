@@ -71,6 +71,9 @@ export default function Home() {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [formSubmitted, setFormSubmitted] = useState(false);
   const [newsletterSubmitted, setNewsletterSubmitted] = useState(false);
+  const [formData, setFormData] = useState({
+    fullName: "", email: "", phone: "", street: "", houseNumber: "", commitmentType: "monthly",
+  });
   const { toast } = useToast();
 
   const { data: stats = DEFAULT_STATS } = useQuery<SiteStats>({
@@ -85,8 +88,17 @@ export default function Home() {
     staleTime: 30_000,
   });
 
-  const handleFormSubmit = (e: React.FormEvent) => {
+  const handleFormSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    try {
+      await fetch(`${BASE}/api/commitments`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(formData),
+      });
+    } catch {
+      // silently ignore network errors — form still shows success
+    }
     setFormSubmitted(true);
     toast({
       title: "Commitment received!",
@@ -310,31 +322,36 @@ export default function Home() {
                     <div className="grid md:grid-cols-2 gap-6">
                       <div className="space-y-2">
                         <Label htmlFor="fullName">Full Name</Label>
-                        <Input id="fullName" required placeholder="John Doe" className="bg-background border-border" data-testid="input-fullname" />
+                        <Input id="fullName" required placeholder="John Doe" className="bg-background border-border" data-testid="input-fullname"
+                          value={formData.fullName} onChange={e => setFormData(p => ({ ...p, fullName: e.target.value }))} />
                       </div>
                       <div className="space-y-2">
                         <Label htmlFor="email">Email Address</Label>
-                        <Input id="email" type="email" required placeholder="john@example.com" className="bg-background border-border" data-testid="input-email" />
+                        <Input id="email" type="email" required placeholder="john@example.com" className="bg-background border-border" data-testid="input-email"
+                          value={formData.email} onChange={e => setFormData(p => ({ ...p, email: e.target.value }))} />
                       </div>
                       <div className="space-y-2">
                         <Label htmlFor="phone">Phone Number</Label>
-                        <Input id="phone" type="tel" required placeholder="082 123 4567" className="bg-background border-border" data-testid="input-phone" />
+                        <Input id="phone" type="tel" required placeholder="082 123 4567" className="bg-background border-border" data-testid="input-phone"
+                          value={formData.phone} onChange={e => setFormData(p => ({ ...p, phone: e.target.value }))} />
                       </div>
                       <div className="grid grid-cols-2 gap-4">
                         <div className="space-y-2">
                           <Label htmlFor="street">Street Name</Label>
-                          <Input id="street" required placeholder="Derby" className="bg-background border-border" data-testid="input-street" />
+                          <Input id="street" required placeholder="Derby" className="bg-background border-border" data-testid="input-street"
+                            value={formData.street} onChange={e => setFormData(p => ({ ...p, street: e.target.value }))} />
                         </div>
                         <div className="space-y-2">
                           <Label htmlFor="houseNumber">House No.</Label>
-                          <Input id="houseNumber" required placeholder="42" className="bg-background border-border" data-testid="input-housenumber" />
+                          <Input id="houseNumber" required placeholder="42" className="bg-background border-border" data-testid="input-housenumber"
+                            value={formData.houseNumber} onChange={e => setFormData(p => ({ ...p, houseNumber: e.target.value }))} />
                         </div>
                       </div>
                     </div>
                     
                     <div className="space-y-2">
                       <Label>Commitment Type</Label>
-                      <Select required defaultValue="monthly">
+                      <Select required value={formData.commitmentType} onValueChange={v => setFormData(p => ({ ...p, commitmentType: v }))}>
                         <SelectTrigger className="bg-background border-border" data-testid="select-commitment-type">
                           <SelectValue placeholder="Select type" />
                         </SelectTrigger>

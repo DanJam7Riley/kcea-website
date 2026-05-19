@@ -19,6 +19,18 @@ export const streetCaptainsTable = pgTable("street_captains", {
   status: text("status").notNull(),
 });
 
+export const commitmentsTable = pgTable("commitments", {
+  id: serial("id").primaryKey(),
+  fullName: text("full_name").notNull(),
+  email: text("email").notNull(),
+  phone: text("phone").notNull(),
+  street: text("street").notNull(),
+  houseNumber: text("house_number").notNull(),
+  commitmentType: text("commitment_type").notNull(),
+  notes: text("notes"),
+  submittedAt: timestamp("submitted_at").notNull().defaultNow(),
+});
+
 export const insertSiteStatsSchema = createInsertSchema(siteStatsTable).omit({ id: true, updatedAt: true });
 export const updateSiteStatsSchema = insertSiteStatsSchema.partial();
 export type SiteStats = typeof siteStatsTable.$inferSelect;
@@ -27,3 +39,7 @@ export const insertStreetCaptainSchema = createInsertSchema(streetCaptainsTable)
 export const updateStreetCaptainSchema = insertStreetCaptainSchema.partial();
 export type StreetCaptain = typeof streetCaptainsTable.$inferSelect;
 export type InsertStreetCaptain = z.infer<typeof insertStreetCaptainSchema>;
+
+export const insertCommitmentSchema = createInsertSchema(commitmentsTable).omit({ id: true, submittedAt: true });
+export type Commitment = typeof commitmentsTable.$inferSelect;
+export type InsertCommitment = z.infer<typeof insertCommitmentSchema>;
