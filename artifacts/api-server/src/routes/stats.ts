@@ -5,10 +5,10 @@ import { eq } from "drizzle-orm";
 const router = Router();
 
 const DEFAULT_STATS = {
-  committedHouseholds: 178,
-  monthlyContributions: 44500,
+  committedHouseholds: 191,
+  monthlyContributions: 47750,
   targetHouseholds: 680,
-  fundingPercent: 22,
+  fundingPercent: 28,
 };
 
 async function getOrCreateStats() {

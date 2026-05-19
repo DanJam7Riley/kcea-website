@@ -4,10 +4,10 @@ import { z } from "zod/v4";
 
 export const siteStatsTable = pgTable("site_stats", {
   id: serial("id").primaryKey(),
-  committedHouseholds: integer("committed_households").notNull().default(178),
-  monthlyContributions: integer("monthly_contributions").notNull().default(44500),
+  committedHouseholds: integer("committed_households").notNull().default(191),
+  monthlyContributions: integer("monthly_contributions").notNull().default(47750),
   targetHouseholds: integer("target_households").notNull().default(680),
-  fundingPercent: integer("funding_percent").notNull().default(22),
+  fundingPercent: integer("funding_percent").notNull().default(28),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
 
