@@ -388,23 +388,8 @@ export default function Home() {
                     <AlertCircle className="h-6 w-6 text-accent" />
                     <h3 className="text-xl font-bold">Payment Details</h3>
                   </div>
-                  <div className="space-y-4 bg-background/50 p-4 rounded-lg border border-border font-mono text-sm">
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">Bank:</span>
-                      <span className="font-medium">[Your Bank Name]</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">Account:</span>
-                      <span className="font-medium">[Account #]</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">Branch:</span>
-                      <span className="font-medium">[Branch Code]</span>
-                    </div>
-                    <div className="pt-4 border-t border-border mt-4">
-                      <span className="text-muted-foreground block mb-1">Reference:</span>
-                      <span className="font-medium text-primary">NAME + STREET</span>
-                    </div>
+                  <div className="bg-background/50 p-4 rounded-lg border border-border text-sm text-muted-foreground leading-relaxed">
+                    Bank details will be shared directly by your street captain once your commitment form is submitted.
                   </div>
                   <div className="pt-4 space-y-4">
                     <p className="text-sm text-muted-foreground">After making your payment, please email your proof of payment to us.</p>

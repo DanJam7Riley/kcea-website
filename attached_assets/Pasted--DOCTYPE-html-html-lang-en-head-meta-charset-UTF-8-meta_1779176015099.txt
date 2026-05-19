@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>KCEA — Bank Details Prompt</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { background: #0F0F0E; color: #D4CFC6; font-family: 'DM Sans', sans-serif; padding: 32px; }
+  .card { background: #1A1A18; border: 1px solid rgba(201,151,58,0.2); border-radius: 6px; overflow: hidden; max-width: 760px; }
+  .header { padding: 18px 24px; border-bottom: 1px solid rgba(255,255,255,0.06); }
+  .title { font-size: 0.95rem; font-weight: 600; color: #F5F0E8; }
+  .body { padding: 20px 24px; background: #252522; font-size: 0.88rem; line-height: 1.9; color: #D4CFC6; white-space: pre-wrap; }
+  .footer { padding: 14px 24px; display: flex; justify-content: flex-end; }
+  .copy-btn { background: rgba(201,151,58,0.12); border: 1px solid rgba(201,151,58,0.3); color: #C9973A; padding: 9px 22px; border-radius: 2px; font-size: 0.82rem; font-family: 'DM Sans', sans-serif; cursor: pointer; transition: all 0.2s; font-weight: 500; }
+  .copy-btn:hover { background: rgba(201,151,58,0.22); }
+  .copy-btn.copied { background: rgba(74,124,89,0.2); border-color: rgba(74,124,89,0.4); color: #5dbd7a; }
+  .note { margin-top: 20px; max-width: 760px; font-size: 0.82rem; color: #8A8478; line-height: 1.7; }
+  .toast { position: fixed; bottom: 24px; right: 24px; background: #252522; border: 1px solid #C9973A; color: #F5F0E8; padding: 12px 20px; border-radius: 4px; font-size: 0.85rem; opacity: 0; transform: translateY(20px); transition: all 0.3s; pointer-events: none; }
+  .toast.show { opacity: 1; transform: translateY(0); }
+</style>
+</head>
+<body>
+
+<div class="card">
+  <div class="header"><div class="title">Paste into Replit chat</div></div>
+  <div class="body" id="prompt">Remove the bank details section from the payment area completely — do not show any placeholder text like "[Your Bank Name]" or "[Account #]". 
+
+Replace it with this message instead:
+
+"Bank details will be shared directly by your street captain once your commitment form is submitted. You will be contacted within 48 hours of submitting."
+
+Keep the "Email Proof of Payment" button and the kcea.kensington@gmail.com contact — just remove the actual bank detail fields. Make sure the page still looks clean and complete without that section.</div>
+  <div class="footer"><button class="copy-btn" id="btn" onclick="copy()">Copy Prompt</button></div>
+</div>
+
+<p class="note">Once you have a bank account set up, just go back to Replit and say: "Add bank details to the payment section" and give it the real numbers. Takes 2 minutes.</p>
+
+<div class="toast" id="toast"></div>
+<script>
+function copy() {
+  navigator.clipboard.writeText(document.getElementById('prompt').textContent.trim()).then(() => {
+    const btn = document.getElementById('btn');
+    btn.textContent = '✓ Copied!';
+    btn.classList.add('copied');
+    const t = document.getElementById('toast');
+    t.textContent = '✓ Copied — paste into Replit chat';
+    t.classList.add('show');
+    setTimeout(() => { btn.textContent = 'Copy Prompt'; btn.classList.remove('copied'); t.classList.remove('show'); }, 2500);
+  });
+}
+</script>
+</body>
+</html>
