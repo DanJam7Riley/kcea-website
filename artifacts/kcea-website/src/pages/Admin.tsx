@@ -2,7 +2,7 @@ import { useState, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Shield, Save, LogIn, AlertTriangle, CheckCircle, Check, Key,
-  Trash2, Download, Upload, Users, ClipboardList, BarChart3, Search, MessageSquare
+  Trash2, Download, Upload, Users, ClipboardList, BarChart3, Search, MessageSquare, Settings, RefreshCw, Phone
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -13,7 +13,7 @@ import { Badge } from "@/components/ui/badge";
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 
 const STATUS_OPTIONS = ["Strong", "Good", "Solid", "Steady", "In Progress", "Re-engaged", "Critical"];
-const TABS = ["submissions", "stats", "captains", "volunteers", "captain-mgmt"] as const;
+const TABS = ["submissions", "stats", "captains", "volunteers", "captain-mgmt", "settings"] as const;
 type Tab = typeof TABS[number];
 
 interface SiteStats {
@@ -55,8 +55,15 @@ interface CaptainProfile {
   id: number;
   name: string;
   phone: string | null;
+  pin: string | null;
   pinHash: string | null;
   lastLoginAt: string | null;
+}
+
+interface SiteSettings {
+  id: number;
+  notifyWhatsapp: string | null;
+  updatedAt: string;
 }
 
 interface CaptainNote {
@@ -114,6 +121,10 @@ export default function Admin() {
   const [newProfileName, setNewProfileName] = useState("");
   const [newProfilePhone, setNewProfilePhone] = useState("");
   const [showAddProfile, setShowAddProfile] = useState(false);
+  const [settingsNotifyInput, setSettingsNotifyInput] = useState<string | null>(null);
+  const [settingsSaved, setSettingsSaved] = useState(false);
+  const [setPinLoading, setSetPinLoading] = useState<Set<number>>(new Set());
+  const [setPinResult, setSetPinResult] = useState<Record<number, { pin: string; sent: boolean }>>({});
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const qc = useQueryClient();
@@ -256,6 +267,46 @@ export default function Admin() {
         .then(async r => { if (!r.ok) throw new Error(await r.text()); return r.json(); }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["captain-profiles"] }),
   });
+
+  const { data: siteSettings } = useQuery<SiteSettings>({
+    queryKey: ["site-settings"],
+    queryFn: () => fetch(`${BASE}/api/settings`, { headers: authHeaders }).then(async r => {
+      if (!r.ok) throw new Error(await r.text()); return r.json();
+    }),
+    enabled: authed && activeTab === "settings",
+  });
+
+  const saveSettings = useMutation({
+    mutationFn: (data: { notifyWhatsapp: string }) =>
+      fetch(`${BASE}/api/settings`, {
+        method: "PUT",
+        headers: { ...authHeaders, "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      }).then(async r => { if (!r.ok) throw new Error(await r.text()); return r.json(); }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["site-settings"] });
+      setSettingsSaved(true);
+      setTimeout(() => setSettingsSaved(false), 3000);
+    },
+  });
+
+  const handleSetPin = async (id: number) => {
+    setSetPinLoading(prev => new Set([...prev, id]));
+    try {
+      const res = await fetch(`${BASE}/api/captain/management/${id}/set-pin`, {
+        method: "POST",
+        headers: authHeaders,
+      });
+      const data = await res.json() as { pin?: string; whatsappSent?: boolean };
+      if (res.ok && data.pin) {
+        setSetPinResult(prev => ({ ...prev, [id]: { pin: data.pin!, sent: !!data.whatsappSent } }));
+        qc.invalidateQueries({ queryKey: ["captain-profiles"] });
+        setTimeout(() => setSetPinResult(prev => { const n = { ...prev }; delete n[id]; return n; }), 10000);
+      }
+    } finally {
+      setSetPinLoading(prev => { const n = new Set(prev); n.delete(id); return n; });
+    }
+  };
 
   const handleTestNotify = async () => {
     setTestNotifyState("loading");
@@ -528,7 +579,7 @@ export default function Admin() {
 
         {/* Tabs */}
         <div className="flex gap-1 border-b border-border">
-          {([ ["submissions", ClipboardList, "Submissions"], ["stats", BarChart3, "Stats"], ["captains", Users, "Captains"], ["volunteers", Shield, "Volunteers"], ["captain-mgmt", Key, "Captain Portal"] ] as const).map(([tab, Icon, label]) => (
+          {([ ["submissions", ClipboardList, "Submissions"], ["stats", BarChart3, "Stats"], ["captains", Users, "Captains"], ["volunteers", Shield, "Volunteers"], ["captain-mgmt", Key, "Captain Portal"], ["settings", Settings, "Settings"] ] as const).map(([tab, Icon, label]) => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
@@ -974,73 +1025,110 @@ export default function Admin() {
                   </div>
                 ) : (
                   <div className="space-y-2">
-                    <div className="grid grid-cols-12 gap-3 px-3 py-2 text-xs font-medium text-muted-foreground uppercase tracking-wide border-b border-border">
-                      <div className="col-span-3">Captain</div>
-                      <div className="col-span-3">Phone</div>
-                      <div className="col-span-2">PIN</div>
-                      <div className="col-span-2">Last Login</div>
-                      <div className="col-span-2">Status</div>
-                    </div>
                     {captainProfiles.map(p => {
                       const streets = captains.filter(c => c.captain === p.name).map(c => c.street);
                       const isSaved = savedProfiles.has(p.id);
+                      const isSettingPin = setPinLoading.has(p.id);
+                      const pinResult = setPinResult[p.id];
                       return (
-                        <div key={p.id} className="grid grid-cols-12 gap-3 items-center px-3 py-3 rounded-lg bg-background/50 border border-border">
-                          <div className="col-span-3">
-                            <p className="font-medium text-sm">{p.name}</p>
-                            <p className="text-xs text-muted-foreground">{streets.length > 0 ? streets.join(", ") : "—"}</p>
-                          </div>
-                          <div className="col-span-3">
-                            <Input
-                              value={phoneEdits[p.id] ?? p.phone ?? ""}
-                              onChange={e => setPhoneEdits(prev => ({ ...prev, [p.id]: e.target.value }))}
-                              placeholder="+27821234567"
-                              className="bg-background border-border h-7 text-xs"
-                            />
-                          </div>
-                          <div className="col-span-2">
-                            <Input
-                              type="password"
-                              value={pinEdits[p.id] ?? ""}
-                              onChange={e => setPinEdits(prev => ({ ...prev, [p.id]: e.target.value.replace(/\D/g, "").slice(0, 4) }))}
-                              placeholder={p.pinHash ? "••••" : "Set PIN"}
-                              maxLength={4}
-                              className="bg-background border-border h-7 text-xs tracking-widest text-center"
-                            />
-                          </div>
-                          <div className="col-span-2">
-                            <p className="text-xs text-muted-foreground">
-                              {p.lastLoginAt
-                                ? new Date(p.lastLoginAt).toLocaleDateString("en-ZA", { day: "2-digit", month: "short" })
-                                : "Never"}
-                            </p>
-                          </div>
-                          <div className="col-span-2 flex items-center gap-1 justify-end">
-                            {isSaved ? (
-                              <span className="text-xs text-green-400 flex items-center gap-1"><CheckCircle className="h-3 w-3" /> Saved</span>
-                            ) : (
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                className="h-6 text-xs px-2 gap-1 border-border"
-                                disabled={updateCaptainProfile.isPending}
-                                onClick={() => {
-                                  const phone = phoneEdits[p.id] !== undefined ? phoneEdits[p.id] : p.phone ?? "";
-                                  const pin = pinEdits[p.id] ?? "";
-                                  updateCaptainProfile.mutate({ id: p.id, phone, ...(pin ? { pin } : {}) });
-                                }}
+                        <div key={p.id} className="rounded-lg bg-background/50 border border-border p-4 space-y-3">
+                          {/* Row 1: name, street, last login, delete */}
+                          <div className="flex items-start justify-between gap-3">
+                            <div>
+                              <p className="font-medium text-sm">{p.name}</p>
+                              <p className="text-xs text-muted-foreground mt-0.5">{streets.length > 0 ? streets.join(", ") : "No streets assigned"}</p>
+                            </div>
+                            <div className="flex items-center gap-3 shrink-0">
+                              <div className="text-right">
+                                <p className="text-xs text-muted-foreground">Last login</p>
+                                <p className="text-xs font-medium">
+                                  {p.lastLoginAt
+                                    ? new Date(p.lastLoginAt).toLocaleDateString("en-ZA", { day: "2-digit", month: "short", year: "numeric" })
+                                    : "Never"}
+                                </p>
+                              </div>
+                              <button
+                                onClick={() => { if (confirm(`Remove ${p.name} from the portal? They will no longer be able to log in.`)) deleteCaptainProfile.mutate(p.id); }}
+                                className="text-muted-foreground hover:text-red-400 transition-colors p-1 rounded"
+                                title="Delete captain"
                               >
-                                <Save className="h-3 w-3" />
-                                Save
-                              </Button>
-                            )}
-                            <button
-                              onClick={() => { if (confirm(`Remove ${p.name} from the portal? They will no longer be able to log in.`)) deleteCaptainProfile.mutate(p.id); }}
-                              className="text-muted-foreground hover:text-red-400 transition-colors p-1 rounded"
-                              title="Delete"
-                            >
-                              <Trash2 className="h-3.5 w-3.5" />
-                            </button>
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </button>
+                            </div>
+                          </div>
+                          {/* Row 2: phone + PIN */}
+                          <div className="flex items-end gap-3 flex-wrap">
+                            <div className="flex-1 min-w-[180px] space-y-1">
+                              <Label className="text-xs flex items-center gap-1"><Phone className="h-3 w-3" /> Phone number</Label>
+                              <div className="flex gap-2">
+                                <Input
+                                  value={phoneEdits[p.id] ?? p.phone ?? ""}
+                                  onChange={e => setPhoneEdits(prev => ({ ...prev, [p.id]: e.target.value }))}
+                                  placeholder="+27821234567"
+                                  className="bg-background border-border h-8 text-xs"
+                                />
+                                {isSaved ? (
+                                  <span className="text-xs text-green-400 flex items-center gap-1 shrink-0"><CheckCircle className="h-3.5 w-3.5" /> Saved</span>
+                                ) : (
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    className="h-8 text-xs px-2 gap-1 border-border shrink-0"
+                                    disabled={updateCaptainProfile.isPending}
+                                    onClick={() => {
+                                      const phone = phoneEdits[p.id] !== undefined ? phoneEdits[p.id] : p.phone ?? "";
+                                      updateCaptainProfile.mutate({ id: p.id, phone });
+                                    }}
+                                  >
+                                    <Save className="h-3 w-3" /> Save
+                                  </Button>
+                                )}
+                              </div>
+                            </div>
+                            <div className="space-y-1">
+                              <Label className="text-xs flex items-center gap-1"><Key className="h-3 w-3" /> Portal PIN</Label>
+                              <div className="flex items-center gap-2">
+                                {pinResult ? (
+                                  <div className="flex items-center gap-2">
+                                    <span className="font-mono text-lg font-bold text-primary tracking-[0.3em] bg-primary/10 px-3 py-1 rounded-md">{pinResult.pin}</span>
+                                    <span className="text-xs text-green-400 flex items-center gap-1">
+                                      <CheckCircle className="h-3 w-3" />
+                                      {pinResult.sent ? "Sent via WhatsApp" : "PIN set (no phone)"}
+                                    </span>
+                                  </div>
+                                ) : p.pin ? (
+                                  <div className="flex items-center gap-2">
+                                    <span className="font-mono text-lg font-bold text-foreground tracking-[0.3em] bg-background border border-border px-3 py-1 rounded-md">{p.pin}</span>
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      className="h-8 text-xs px-2 gap-1 border-amber-500/40 text-amber-400 hover:bg-amber-500/10"
+                                      disabled={isSettingPin}
+                                      onClick={() => handleSetPin(p.id)}
+                                    >
+                                      <RefreshCw className={`h-3 w-3 ${isSettingPin ? "animate-spin" : ""}`} />
+                                      {isSettingPin ? "Resetting…" : "Reset PIN"}
+                                    </Button>
+                                  </div>
+                                ) : (
+                                  <Button
+                                    size="sm"
+                                    className="h-8 text-xs px-3 gap-1 bg-primary text-primary-foreground hover:bg-primary/90"
+                                    disabled={isSettingPin}
+                                    onClick={() => handleSetPin(p.id)}
+                                  >
+                                    <Key className={`h-3 w-3 ${isSettingPin ? "animate-spin" : ""}`} />
+                                    {isSettingPin ? "Setting PIN…" : "Set PIN"}
+                                  </Button>
+                                )}
+                              </div>
+                              {!pinResult && p.pin && (
+                                <p className="text-xs text-muted-foreground">Reset generates a new random PIN and sends it via WhatsApp</p>
+                              )}
+                              {!pinResult && !p.pin && (
+                                <p className="text-xs text-muted-foreground">Generates a random 4-digit PIN and sends via WhatsApp</p>
+                              )}
+                            </div>
                           </div>
                         </div>
                       );
@@ -1091,6 +1179,95 @@ export default function Admin() {
               </CardContent>
             </Card>
 
+          </div>
+        )}
+
+        {activeTab === "settings" && (
+          <div className="space-y-6 max-w-2xl">
+            <Card className="bg-card border-card-border">
+              <CardHeader className="pb-4">
+                <div className="flex items-center gap-3">
+                  <div className="bg-primary/20 p-2 rounded-lg"><MessageSquare className="h-5 w-5 text-primary" /></div>
+                  <div>
+                    <CardTitle className="text-xl">WhatsApp Notification Number</CardTitle>
+                    <p className="text-sm text-muted-foreground mt-1">New commitment and volunteer sign-up alerts will be sent to this number.</p>
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor="notify-whatsapp">WhatsApp number (international format)</Label>
+                  <Input
+                    id="notify-whatsapp"
+                    value={settingsNotifyInput ?? siteSettings?.notifyWhatsapp ?? ""}
+                    onChange={e => setSettingsNotifyInput(e.target.value)}
+                    placeholder="+27821234567"
+                    className="bg-background border-border"
+                  />
+                  <p className="text-xs text-muted-foreground">Include the country code, e.g. +27 for South Africa. Must be registered on WhatsApp.</p>
+                </div>
+                <div className="flex items-center gap-3">
+                  <Button
+                    onClick={() => saveSettings.mutate({ notifyWhatsapp: settingsNotifyInput ?? siteSettings?.notifyWhatsapp ?? "" })}
+                    disabled={saveSettings.isPending}
+                    className="bg-primary text-primary-foreground hover:bg-primary/90 gap-2"
+                  >
+                    <Save className="h-4 w-4" />
+                    {saveSettings.isPending ? "Saving…" : "Save number"}
+                  </Button>
+                  {settingsSaved && (
+                    <span className="text-sm text-green-400 flex items-center gap-1.5">
+                      <CheckCircle className="h-4 w-4" /> Saved
+                    </span>
+                  )}
+                </div>
+                {siteSettings?.notifyWhatsapp && (
+                  <div className="bg-green-500/10 border border-green-500/20 rounded-lg p-3">
+                    <p className="text-sm text-green-400 flex items-center gap-2">
+                      <CheckCircle className="h-4 w-4 shrink-0" />
+                      Notifications active: <span className="font-mono font-medium">{siteSettings.notifyWhatsapp}</span>
+                    </p>
+                  </div>
+                )}
+                {!siteSettings?.notifyWhatsapp && (
+                  <div className="bg-amber-500/10 border border-amber-500/20 rounded-lg p-3">
+                    <p className="text-sm text-amber-400 flex items-center gap-2">
+                      <AlertTriangle className="h-4 w-4 shrink-0" />
+                      No notify number set — WhatsApp alerts are disabled.
+                    </p>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            <Card className="bg-card border-card-border">
+              <CardHeader className="pb-4">
+                <div className="flex items-center gap-3">
+                  <div className="bg-blue-500/20 p-2 rounded-lg"><Settings className="h-5 w-5 text-blue-400" /></div>
+                  <div>
+                    <CardTitle className="text-xl">Twilio Configuration</CardTitle>
+                    <p className="text-sm text-muted-foreground mt-1">WhatsApp messages are sent via Twilio. These must be set as environment secrets.</p>
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-2">
+                  {[
+                    { key: "TWILIO_ACCOUNT_SID", label: "Account SID", hint: "Starts with AC…" },
+                    { key: "TWILIO_AUTH_TOKEN", label: "Auth Token", hint: "From your Twilio console" },
+                    { key: "TWILIO_WHATSAPP_FROM", label: "From number (optional)", hint: "Default: +14155238886 (Twilio sandbox)" },
+                  ].map(({ key, label, hint }) => (
+                    <div key={key} className="flex items-center justify-between py-2 border-b border-border last:border-0">
+                      <div>
+                        <p className="text-sm font-medium font-mono">{key}</p>
+                        <p className="text-xs text-muted-foreground">{label} — {hint}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <p className="text-xs text-muted-foreground mt-4">Set these in the Replit Secrets panel (lock icon in the sidebar). Changes take effect after redeployment.</p>
+              </CardContent>
+            </Card>
           </div>
         )}
 

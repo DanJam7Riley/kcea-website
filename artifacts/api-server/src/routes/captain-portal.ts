@@ -2,6 +2,7 @@ import { Router } from "express";
 import { createHmac, randomBytes } from "crypto";
 import { db, captainProfilesTable, captainTokensTable, streetCaptainsTable, commitmentsTable, propertyNotesTable, streetHousesTable } from "@workspace/db";
 import { eq, and, inArray, gt, desc } from "drizzle-orm";
+import { sendWhatsApp, pinMessage } from "../lib/whatsapp";
 
 const router = Router();
 const ADMIN_PASSWORD = () => process.env.ADMIN_PASSWORD ?? "kcea2026";
@@ -287,6 +288,7 @@ router.put("/captain/management/:id", async (req, res) => {
   if (typeof body.pin === "string") {
     const pin = body.pin.trim();
     if (pin && !/^\d{4}$/.test(pin)) { res.status(400).json({ error: "PIN must be 4 digits" }); return; }
+    patch.pin = pin || null;
     patch.pinHash = pin ? hashPin(pin) : null;
   }
 
@@ -299,6 +301,37 @@ router.put("/captain/management/:id", async (req, res) => {
   } catch (err) {
     req.log.error(err);
     res.status(500).json({ error: "Failed to update profile" });
+  }
+});
+
+// POST /api/captain/management/:id/set-pin  — generate (or set) PIN and notify captain via WhatsApp
+router.post("/captain/management/:id/set-pin", async (req, res) => {
+  const pw = req.headers["x-admin-password"] as string;
+  if (!pw || pw !== ADMIN_PASSWORD()) { res.status(401).json({ error: "Unauthorized" }); return; }
+  const id = parseInt(req.params.id, 10);
+  if (isNaN(id)) { res.status(400).json({ error: "Invalid id" }); return; }
+
+  const body = (req.body as Record<string, unknown> | undefined) ?? {};
+  const providedPin = typeof body.pin === "string" && /^\d{4}$/.test(body.pin.trim()) ? body.pin.trim() : null;
+  const pin = providedPin ?? String(Math.floor(1000 + Math.random() * 9000));
+
+  try {
+    const [updated] = await db
+      .update(captainProfilesTable)
+      .set({ pin, pinHash: hashPin(pin) })
+      .where(eq(captainProfilesTable.id, id))
+      .returning();
+
+    if (!updated) { res.status(404).json({ error: "Not found" }); return; }
+
+    if (updated.phone) {
+      void sendWhatsApp(pinMessage(updated.name, pin), updated.phone).catch(() => {});
+    }
+
+    res.json({ ...updated, whatsappSent: !!updated.phone });
+  } catch (err) {
+    req.log.error(err);
+    res.status(500).json({ error: "Failed to set PIN" });
   }
 });
 

@@ -65,9 +65,17 @@ export const captainProfilesTable = pgTable("captain_profiles", {
   id: serial("id").primaryKey(),
   name: text("name").notNull(),
   phone: text("phone"),
+  pin: text("pin"),
   pinHash: text("pin_hash"),
   lastLoginAt: timestamp("last_login_at"),
 });
+
+export const siteSettingsTable = pgTable("site_settings", {
+  id: serial("id").primaryKey(),
+  notifyWhatsapp: text("notify_whatsapp"),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+export type SiteSettings = typeof siteSettingsTable.$inferSelect;
 export type CaptainProfile = typeof captainProfilesTable.$inferSelect;
 
 export const captainTokensTable = pgTable("captain_tokens", {

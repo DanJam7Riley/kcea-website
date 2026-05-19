@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { sendWhatsApp, testMessage } from "../lib/whatsapp";
+import { getNotifyNumber } from "../lib/settings";
 
 const router = Router();
 
@@ -13,7 +14,7 @@ router.post("/notify/test", async (req, res) => {
 
   const accountSid = process.env.TWILIO_ACCOUNT_SID;
   const authToken = process.env.TWILIO_AUTH_TOKEN;
-  const to = process.env.NOTIFY_WHATSAPP_NUMBER;
+  const to = await getNotifyNumber();
 
   if (!accountSid || !authToken || !to) {
     res.status(400).json({
@@ -21,14 +22,14 @@ router.post("/notify/test", async (req, res) => {
       missing: [
         ...(!accountSid ? ["TWILIO_ACCOUNT_SID"] : []),
         ...(!authToken ? ["TWILIO_AUTH_TOKEN"] : []),
-        ...(!to ? ["NOTIFY_WHATSAPP_NUMBER"] : []),
+        ...(!to ? ["Notify WhatsApp number (set in Admin → Settings)"] : []),
       ],
     });
     return;
   }
 
   try {
-    await sendWhatsApp(testMessage());
+    await sendWhatsApp(testMessage(), to);
     res.json({ success: true });
   } catch (err) {
     req.log.error(err);

@@ -1,16 +1,16 @@
 import twilio from "twilio";
 
-export async function sendWhatsApp(body: string): Promise<void> {
+export async function sendWhatsApp(body: string, to?: string): Promise<void> {
   const accountSid = process.env.TWILIO_ACCOUNT_SID;
   const authToken = process.env.TWILIO_AUTH_TOKEN;
   const from = process.env.TWILIO_WHATSAPP_FROM ?? "whatsapp:+14155238886";
-  const to = process.env.NOTIFY_WHATSAPP_NUMBER;
+  const recipient = to ?? process.env.NOTIFY_WHATSAPP_NUMBER;
 
-  if (!accountSid || !authToken || !to) {
-    return; // not configured — skip silently
+  if (!accountSid || !authToken || !recipient) {
+    return;
   }
 
-  const toFormatted = to.startsWith("whatsapp:") ? to : `whatsapp:${to}`;
+  const toFormatted = recipient.startsWith("whatsapp:") ? recipient : `whatsapp:${recipient}`;
 
   const client = twilio(accountSid, authToken);
   await client.messages.create({ from, to: toFormatted, body });
@@ -34,4 +34,8 @@ export function volunteerMessage(fullName: string, street: string, phone: string
 
 export function testMessage(): string {
   return `KCEA admin notification test ✔️\nIf you received this, WhatsApp notifications are working correctly.`;
+}
+
+export function pinMessage(name: string, pin: string): string {
+  return `Hi ${name}, your KCEA Captain Portal PIN is: ${pin}. Login at: attached-assets-janineriley.replit.app/captain`;
 }
