@@ -1,4 +1,4 @@
-import { pgTable, serial, integer, text, timestamp } from "drizzle-orm/pg-core";
+import { pgTable, serial, integer, text, timestamp, boolean } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 
@@ -28,6 +28,7 @@ export const commitmentsTable = pgTable("commitments", {
   houseNumber: text("house_number").notNull(),
   commitmentType: text("commitment_type").notNull(),
   notes: text("notes"),
+  imported: boolean("imported").notNull().default(false),
   submittedAt: timestamp("submitted_at").notNull().defaultNow(),
 });
 

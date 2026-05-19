@@ -1,8 +1,8 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Shield, Save, LogIn, AlertTriangle, CheckCircle,
-  Trash2, Download, Users, ClipboardList, BarChart3, Search
+  Trash2, Download, Upload, Users, ClipboardList, BarChart3, Search
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -41,7 +41,13 @@ interface Commitment {
   street: string;
   houseNumber: string;
   commitmentType: string;
+  imported: boolean;
   submittedAt: string;
+}
+
+interface ImportResult {
+  added: number;
+  skipped: number;
 }
 
 interface Volunteer {
@@ -79,6 +85,10 @@ export default function Admin() {
   const [statsForm, setStatsForm] = useState<Partial<SiteStats>>({});
   const [captainEdits, setCaptainEdits] = useState<Record<number, Partial<StreetCaptain>>>({});
   const [savedCaptains, setSavedCaptains] = useState<Set<number>>(new Set());
+  const [importResult, setImportResult] = useState<ImportResult | null>(null);
+  const [importLoading, setImportLoading] = useState(false);
+  const [importError, setImportError] = useState("");
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const qc = useQueryClient();
 
@@ -174,10 +184,11 @@ export default function Admin() {
     setCaptainEdits(prev => ({ ...prev, [id]: { ...(prev[id] ?? {}), [field]: value } }));
 
   const exportCsv = () => {
-    const headers = ["ID", "Name", "Email", "Phone", "Street", "House", "Type", "Date"];
+    const headers = ["ID", "Name", "Email", "Phone", "Street", "House", "Type", "Source", "Date"];
     const rows = commitments.map(c => [
       c.id, c.fullName, c.email, c.phone, c.street, c.houseNumber,
       c.commitmentType === "onceoff" ? "Once-off (R3,000)" : "Monthly (R250/mo)",
+      c.imported ? "Imported" : "Online",
       new Date(c.submittedAt).toLocaleString(),
     ]);
     const csv = [headers, ...rows].map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(",")).join("\n");
@@ -185,6 +196,85 @@ export default function Admin() {
     a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
     a.download = `kcea-commitments-${new Date().toISOString().slice(0, 10)}.csv`;
     a.click();
+  };
+
+  const parseCSV = (text: string) => {
+    const lines = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n").filter(l => l.trim());
+    if (lines.length < 2) return [];
+
+    const parseRow = (line: string): string[] => {
+      const cols: string[] = [];
+      let cur = "";
+      let inQ = false;
+      for (let i = 0; i < line.length; i++) {
+        const ch = line[i];
+        if (ch === '"') {
+          if (inQ && line[i + 1] === '"') { cur += '"'; i++; }
+          else { inQ = !inQ; }
+        } else if (ch === "," && !inQ) {
+          cols.push(cur.trim()); cur = "";
+        } else {
+          cur += ch;
+        }
+      }
+      cols.push(cur.trim());
+      return cols;
+    };
+
+    const headers = parseRow(lines[0]).map(h => h.toLowerCase().replace(/[^a-z0-9]/g, ""));
+    const colIndex = (names: string[]) => {
+      for (const n of names) { const i = headers.indexOf(n); if (i !== -1) return i; }
+      return -1;
+    };
+
+    const nameIdx = colIndex(["fullname", "name", "fullname"]);
+    const streetIdx = colIndex(["street", "streetname"]);
+    const houseIdx = colIndex(["housenumber", "house", "houseno", "housenum"]);
+    const emailIdx = colIndex(["email", "emailaddress"]);
+    const phoneIdx = colIndex(["phone", "cellnumber", "cell", "mobile"]);
+    const typeIdx = colIndex(["commitmenttype", "type", "paymenttype"]);
+    const dateIdx = colIndex(["datesubmitted", "date", "submitteddate", "submittedat"]);
+
+    return lines.slice(1).map(line => {
+      const cols = parseRow(line);
+      const get = (i: number) => (i >= 0 ? (cols[i] ?? "").trim() : "");
+      return {
+        fullName: get(nameIdx),
+        street: get(streetIdx),
+        houseNumber: get(houseIdx),
+        email: get(emailIdx),
+        phone: get(phoneIdx),
+        commitmentType: get(typeIdx),
+        submittedAt: get(dateIdx),
+      };
+    }).filter(r => r.fullName || r.street);
+  };
+
+  const handleImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (fileInputRef.current) fileInputRef.current.value = "";
+    setImportError("");
+    setImportResult(null);
+    setImportLoading(true);
+    try {
+      const text = await file.text();
+      const rows = parseCSV(text);
+      if (rows.length === 0) { setImportError("No valid rows found in the CSV file."); setImportLoading(false); return; }
+      const res = await fetch(`${BASE}/api/commitments/import`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...authHeaders },
+        body: JSON.stringify({ rows }),
+      });
+      if (!res.ok) { setImportError("Import failed — server error."); setImportLoading(false); return; }
+      const result: ImportResult = await res.json();
+      setImportResult(result);
+      qc.invalidateQueries({ queryKey: ["commitments"] });
+    } catch {
+      setImportError("Could not read or parse the file.");
+    } finally {
+      setImportLoading(false);
+    }
   };
 
   const filtered = commitments.filter(c => {
@@ -322,18 +412,57 @@ export default function Admin() {
           <Card className="bg-card border-card-border">
             <CardHeader className="flex flex-row items-center justify-between gap-4 pb-4">
               <CardTitle className="text-xl">Commitment Submissions</CardTitle>
-              <Button
-                size="sm"
-                variant="outline"
-                className="border-border gap-2"
-                onClick={exportCsv}
-                disabled={commitments.length === 0}
-              >
-                <Download className="h-4 w-4" />
-                Export CSV
-              </Button>
+              <div className="flex gap-2">
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".csv"
+                  className="hidden"
+                  onChange={handleImport}
+                />
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="border-border gap-2"
+                  onClick={() => { setImportResult(null); setImportError(""); fileInputRef.current?.click(); }}
+                  disabled={importLoading}
+                >
+                  <Upload className="h-4 w-4" />
+                  {importLoading ? "Importing…" : "Import CSV"}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="border-border gap-2"
+                  onClick={exportCsv}
+                  disabled={commitments.length === 0}
+                >
+                  <Download className="h-4 w-4" />
+                  Export CSV
+                </Button>
+              </div>
             </CardHeader>
             <CardContent className="space-y-4">
+              {importResult && (
+                <div className="flex items-start gap-3 bg-green-500/10 border border-green-500/20 rounded-lg p-4 text-sm">
+                  <CheckCircle className="h-4 w-4 text-green-400 mt-0.5 shrink-0" />
+                  <div>
+                    <p className="font-medium text-green-400">Import complete</p>
+                    <p className="text-muted-foreground mt-0.5">
+                      {importResult.added} record{importResult.added !== 1 ? "s" : ""} added
+                      {importResult.skipped > 0 && ` · ${importResult.skipped} skipped as duplicate${importResult.skipped !== 1 ? "s" : ""}`}
+                    </p>
+                  </div>
+                  <button onClick={() => setImportResult(null)} className="ml-auto text-muted-foreground hover:text-foreground text-lg leading-none">×</button>
+                </div>
+              )}
+              {importError && (
+                <div className="flex items-center gap-3 bg-red-500/10 border border-red-500/20 rounded-lg p-4 text-sm text-red-400">
+                  <AlertTriangle className="h-4 w-4 shrink-0" />
+                  {importError}
+                  <button onClick={() => setImportError("")} className="ml-auto text-muted-foreground hover:text-foreground text-lg leading-none">×</button>
+                </div>
+              )}
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                 <Input
@@ -378,8 +507,11 @@ export default function Admin() {
                         <p className="text-xs truncate">{c.email}</p>
                         <p className="text-xs text-muted-foreground">{c.phone}</p>
                       </div>
-                      <div className="col-span-2">
+                      <div className="col-span-2 flex flex-col gap-1">
                         <TypeBadge type={c.commitmentType} />
+                        {c.imported && (
+                          <Badge className="bg-amber-500/20 text-amber-400 border-amber-500/20 text-xs w-fit" variant="outline">Imported</Badge>
+                        )}
                       </div>
                       <div className="col-span-1">
                         <p className="text-xs text-muted-foreground whitespace-nowrap">

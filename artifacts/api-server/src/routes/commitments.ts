@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { db, commitmentsTable } from "@workspace/db";
-import { eq, desc } from "drizzle-orm";
+import { eq, desc, and } from "drizzle-orm";
 
 const router = Router();
 
@@ -22,12 +22,78 @@ router.post("/commitments", async (req, res) => {
   try {
     const [created] = await db
       .insert(commitmentsTable)
-      .values({ fullName, email, phone, street, houseNumber, commitmentType })
+      .values({ fullName, email, phone, street, houseNumber, commitmentType, imported: false })
       .returning();
     res.status(201).json(created);
   } catch (err) {
     req.log.error(err);
     res.status(500).json({ error: "Failed to save commitment" });
+  }
+});
+
+router.post("/commitments/import", async (req, res) => {
+  const password = req.headers["x-admin-password"] as string;
+  const adminPassword = process.env.ADMIN_PASSWORD ?? "kcea2026";
+  if (!password || password !== adminPassword) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+
+  const body = req.body as Record<string, unknown>;
+  const rows = body.rows;
+  if (!Array.isArray(rows)) {
+    res.status(400).json({ error: "rows must be an array" });
+    return;
+  }
+
+  let added = 0;
+  let skipped = 0;
+
+  try {
+    const existing = await db
+      .select({ fullName: commitmentsTable.fullName, street: commitmentsTable.street, houseNumber: commitmentsTable.houseNumber })
+      .from(commitmentsTable);
+
+    const existingKeys = new Set(
+      existing.map(r => `${r.fullName.toLowerCase()}|${r.street.toLowerCase()}|${r.houseNumber.toLowerCase()}`)
+    );
+
+    for (const row of rows) {
+      if (typeof row !== "object" || row === null) { skipped++; continue; }
+      const r = row as Record<string, unknown>;
+
+      const fullName = typeof r.fullName === "string" ? r.fullName.trim() : "";
+      const street = typeof r.street === "string" ? r.street.trim() : "";
+      const houseNumber = typeof r.houseNumber === "string" ? r.houseNumber.trim() : "";
+      const email = typeof r.email === "string" ? r.email.trim() : "";
+      const phone = typeof r.phone === "string" ? r.phone.trim() : "";
+      const commitmentType = typeof r.commitmentType === "string" ? r.commitmentType.trim() : "monthly";
+      const submittedAt = typeof r.submittedAt === "string" && r.submittedAt ? new Date(r.submittedAt) : new Date();
+
+      if (!fullName || !street || !houseNumber) { skipped++; continue; }
+
+      const key = `${fullName.toLowerCase()}|${street.toLowerCase()}|${houseNumber.toLowerCase()}`;
+      if (existingKeys.has(key)) { skipped++; continue; }
+
+      await db.insert(commitmentsTable).values({
+        fullName,
+        email: email || "imported@kcea.local",
+        phone: phone || "-",
+        street,
+        houseNumber,
+        commitmentType: commitmentType === "once-off" || commitmentType === "onceoff" ? "onceoff" : "monthly",
+        imported: true,
+        submittedAt: isNaN(submittedAt.getTime()) ? new Date() : submittedAt,
+      });
+
+      existingKeys.add(key);
+      added++;
+    }
+
+    res.json({ added, skipped });
+  } catch (err) {
+    req.log.error(err);
+    res.status(500).json({ error: "Import failed" });
   }
 });
 
