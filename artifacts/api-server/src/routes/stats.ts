@@ -21,6 +21,16 @@ async function getOrCreateStats() {
   return created;
 }
 
+router.post("/admin/verify", (req, res) => {
+  const password = req.headers["x-admin-password"] as string;
+  const adminPassword = process.env.ADMIN_PASSWORD ?? "kcea2026";
+  if (!password || password !== adminPassword) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+  res.json({ ok: true });
+});
+
 router.get("/stats", async (req, res) => {
   try {
     const stats = await getOrCreateStats();

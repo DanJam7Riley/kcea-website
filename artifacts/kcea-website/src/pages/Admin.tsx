@@ -285,8 +285,19 @@ export default function Admin() {
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setAuthError("");
-    const res = await fetch(`${BASE}/api/stats`, { headers: authHeaders });
-    if (res.ok) { setAuthed(true); } else { setAuthError("Incorrect password. Please try again."); }
+    try {
+      const res = await fetch(`${BASE}/api/admin/verify`, {
+        method: "POST",
+        headers: authHeaders,
+      });
+      if (res.ok) {
+        setAuthed(true);
+      } else {
+        setAuthError("Incorrect password. Please try again.");
+      }
+    } catch {
+      setAuthError("Could not reach the server. Please try again.");
+    }
   };
 
   const handleStatsChange = (field: keyof SiteStats, value: string) =>
