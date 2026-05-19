@@ -29,9 +29,17 @@ router.put("/settings", async (req, res) => {
   }
   const body = req.body as Record<string, unknown>;
   const patch: Record<string, unknown> = { updatedAt: new Date() };
-  if (typeof body.notifyWhatsapp === "string") {
-    patch.notifyWhatsapp = body.notifyWhatsapp.trim() || null;
+
+  if (typeof body.twilioAccountSid === "string") {
+    patch.twilioAccountSid = body.twilioAccountSid.trim() || null;
   }
+  if (typeof body.twilioAuthToken === "string") {
+    patch.twilioAuthToken = body.twilioAuthToken.trim() || null;
+  }
+  if (typeof body.twilioWhatsappFrom === "string") {
+    patch.twilioWhatsappFrom = body.twilioWhatsappFrom.trim() || null;
+  }
+
   try {
     const existing = await getOrCreateSettings();
     const [updated] = await db

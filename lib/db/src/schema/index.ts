@@ -73,6 +73,9 @@ export const captainProfilesTable = pgTable("captain_profiles", {
 export const siteSettingsTable = pgTable("site_settings", {
   id: serial("id").primaryKey(),
   notifyWhatsapp: text("notify_whatsapp"),
+  twilioAccountSid: text("twilio_account_sid"),
+  twilioAuthToken: text("twilio_auth_token"),
+  twilioWhatsappFrom: text("twilio_whatsapp_from"),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
 export type SiteSettings = typeof siteSettingsTable.$inferSelect;

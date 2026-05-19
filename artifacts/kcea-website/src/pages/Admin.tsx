@@ -62,7 +62,9 @@ interface CaptainProfile {
 
 interface SiteSettings {
   id: number;
-  notifyWhatsapp: string | null;
+  twilioAccountSid: string | null;
+  twilioAuthToken: string | null;
+  twilioWhatsappFrom: string | null;
   updatedAt: string;
 }
 
@@ -113,15 +115,15 @@ export default function Admin() {
   const [importResult, setImportResult] = useState<ImportResult | null>(null);
   const [importLoading, setImportLoading] = useState(false);
   const [importError, setImportError] = useState("");
-  const [testNotifyState, setTestNotifyState] = useState<"idle" | "loading" | "ok" | "unconfigured" | "error">("idle");
-  const [testNotifyDetail, setTestNotifyDetail] = useState("");
   const [pinEdits, setPinEdits] = useState<Record<number, string>>({});
   const [phoneEdits, setPhoneEdits] = useState<Record<number, string>>({});
   const [savedProfiles, setSavedProfiles] = useState<Set<number>>(new Set());
   const [newProfileName, setNewProfileName] = useState("");
   const [newProfilePhone, setNewProfilePhone] = useState("");
   const [showAddProfile, setShowAddProfile] = useState(false);
-  const [settingsNotifyInput, setSettingsNotifyInput] = useState<string | null>(null);
+  const [settingsSid, setSettingsSid] = useState<string | null>(null);
+  const [settingsToken, setSettingsToken] = useState<string | null>(null);
+  const [settingsFrom, setSettingsFrom] = useState<string | null>(null);
   const [settingsSaved, setSettingsSaved] = useState(false);
   const [setPinLoading, setSetPinLoading] = useState<Set<number>>(new Set());
   const [setPinResult, setSetPinResult] = useState<Record<number, { pin: string; sent: boolean }>>({});
@@ -277,7 +279,7 @@ export default function Admin() {
   });
 
   const saveSettings = useMutation({
-    mutationFn: (data: { notifyWhatsapp: string }) =>
+    mutationFn: (data: { twilioAccountSid: string; twilioAuthToken: string; twilioWhatsappFrom: string }) =>
       fetch(`${BASE}/api/settings`, {
         method: "PUT",
         headers: { ...authHeaders, "Content-Type": "application/json" },
@@ -306,31 +308,6 @@ export default function Admin() {
     } finally {
       setSetPinLoading(prev => { const n = new Set(prev); n.delete(id); return n; });
     }
-  };
-
-  const handleTestNotify = async () => {
-    setTestNotifyState("loading");
-    setTestNotifyDetail("");
-    try {
-      const res = await fetch(`${BASE}/api/notify/test`, {
-        method: "POST",
-        headers: authHeaders,
-      });
-      const data = await res.json() as { success?: boolean; error?: string; missing?: string[]; detail?: string };
-      if (res.ok && data.success) {
-        setTestNotifyState("ok");
-      } else if (res.status === 400 && data.missing) {
-        setTestNotifyState("unconfigured");
-        setTestNotifyDetail(`Missing: ${(data.missing as string[]).join(", ")}`);
-      } else {
-        setTestNotifyState("error");
-        setTestNotifyDetail(data.detail ?? data.error ?? "Unknown error");
-      }
-    } catch {
-      setTestNotifyState("error");
-      setTestNotifyDetail("Could not reach server");
-    }
-    setTimeout(() => setTestNotifyState("idle"), 8000);
   };
 
   const handleLogin = async (e: React.FormEvent) => {
@@ -513,26 +490,6 @@ export default function Admin() {
           </div>
           <div className="flex items-center gap-3">
             <a href="/" className="text-sm text-muted-foreground hover:text-primary transition-colors">← Back to site</a>
-            <div className="flex flex-col items-end gap-1">
-              <Button
-                variant="outline"
-                size="sm"
-                className={`border-border gap-2 ${
-                  testNotifyState === "ok" ? "border-green-500/50 text-green-400" :
-                  testNotifyState === "error" || testNotifyState === "unconfigured" ? "border-red-500/50 text-red-400" : ""
-                }`}
-                onClick={handleTestNotify}
-                disabled={testNotifyState === "loading"}
-              >
-                <MessageSquare className="h-4 w-4" />
-                {testNotifyState === "loading" ? "Sending…" :
-                 testNotifyState === "ok" ? "Message sent ✓" :
-                 "Test WhatsApp"}
-              </Button>
-              {(testNotifyState === "unconfigured" || testNotifyState === "error") && testNotifyDetail && (
-                <p className="text-xs text-red-400 max-w-48 text-right">{testNotifyDetail}</p>
-              )}
-            </div>
             <Button variant="outline" size="sm" className="border-border" onClick={() => { setAuthed(false); setPassword(""); }}>
               Sign Out
             </Button>
@@ -1187,33 +1144,61 @@ export default function Admin() {
             <Card className="bg-card border-card-border">
               <CardHeader className="pb-4">
                 <div className="flex items-center gap-3">
-                  <div className="bg-primary/20 p-2 rounded-lg"><MessageSquare className="h-5 w-5 text-primary" /></div>
+                  <div className="bg-primary/20 p-2 rounded-lg"><Settings className="h-5 w-5 text-primary" /></div>
                   <div>
-                    <CardTitle className="text-xl">WhatsApp Notification Number</CardTitle>
-                    <p className="text-sm text-muted-foreground mt-1">New commitment and volunteer sign-up alerts will be sent to this number.</p>
+                    <CardTitle className="text-xl">Twilio WhatsApp Credentials</CardTitle>
+                    <p className="text-sm text-muted-foreground mt-1">These credentials are used to send PIN messages to street captains via WhatsApp.</p>
                   </div>
                 </div>
               </CardHeader>
-              <CardContent className="space-y-4">
+              <CardContent className="space-y-5">
                 <div className="space-y-2">
-                  <Label htmlFor="notify-whatsapp">WhatsApp number (international format)</Label>
+                  <Label htmlFor="twilio-sid">Account SID</Label>
                   <Input
-                    id="notify-whatsapp"
-                    value={settingsNotifyInput ?? siteSettings?.notifyWhatsapp ?? ""}
-                    onChange={e => setSettingsNotifyInput(e.target.value)}
-                    placeholder="+27821234567"
-                    className="bg-background border-border"
+                    id="twilio-sid"
+                    value={settingsSid ?? siteSettings?.twilioAccountSid ?? ""}
+                    onChange={e => setSettingsSid(e.target.value)}
+                    placeholder="ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+                    className="bg-background border-border font-mono text-sm"
                   />
-                  <p className="text-xs text-muted-foreground">Include the country code, e.g. +27 for South Africa. Must be registered on WhatsApp.</p>
+                  <p className="text-xs text-muted-foreground">Found in your Twilio console — starts with AC.</p>
                 </div>
-                <div className="flex items-center gap-3">
+                <div className="space-y-2">
+                  <Label htmlFor="twilio-token">Auth Token</Label>
+                  <Input
+                    id="twilio-token"
+                    type="password"
+                    value={settingsToken ?? siteSettings?.twilioAuthToken ?? ""}
+                    onChange={e => setSettingsToken(e.target.value)}
+                    placeholder="••••••••••••••••••••••••••••••••"
+                    className="bg-background border-border font-mono text-sm"
+                  />
+                  <p className="text-xs text-muted-foreground">From your Twilio console — keep this secret.</p>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="twilio-from">WhatsApp From Number</Label>
+                  <Input
+                    id="twilio-from"
+                    value={settingsFrom ?? siteSettings?.twilioWhatsappFrom ?? ""}
+                    onChange={e => setSettingsFrom(e.target.value)}
+                    placeholder="+14155238886"
+                    className="bg-background border-border font-mono text-sm"
+                  />
+                  <p className="text-xs text-muted-foreground">Your Twilio WhatsApp sender number (sandbox default: +14155238886).</p>
+                </div>
+
+                <div className="flex items-center gap-3 pt-1">
                   <Button
-                    onClick={() => saveSettings.mutate({ notifyWhatsapp: settingsNotifyInput ?? siteSettings?.notifyWhatsapp ?? "" })}
+                    onClick={() => saveSettings.mutate({
+                      twilioAccountSid: settingsSid ?? siteSettings?.twilioAccountSid ?? "",
+                      twilioAuthToken: settingsToken ?? siteSettings?.twilioAuthToken ?? "",
+                      twilioWhatsappFrom: settingsFrom ?? siteSettings?.twilioWhatsappFrom ?? "",
+                    })}
                     disabled={saveSettings.isPending}
                     className="bg-primary text-primary-foreground hover:bg-primary/90 gap-2"
                   >
                     <Save className="h-4 w-4" />
-                    {saveSettings.isPending ? "Saving…" : "Save number"}
+                    {saveSettings.isPending ? "Saving…" : "Save credentials"}
                   </Button>
                   {settingsSaved && (
                     <span className="text-sm text-green-400 flex items-center gap-1.5">
@@ -1221,51 +1206,22 @@ export default function Admin() {
                     </span>
                   )}
                 </div>
-                {siteSettings?.notifyWhatsapp && (
+
+                {siteSettings?.twilioAccountSid ? (
                   <div className="bg-green-500/10 border border-green-500/20 rounded-lg p-3">
                     <p className="text-sm text-green-400 flex items-center gap-2">
                       <CheckCircle className="h-4 w-4 shrink-0" />
-                      Notifications active: <span className="font-mono font-medium">{siteSettings.notifyWhatsapp}</span>
+                      Twilio configured — PIN messages will be sent via WhatsApp.
                     </p>
                   </div>
-                )}
-                {!siteSettings?.notifyWhatsapp && (
+                ) : (
                   <div className="bg-amber-500/10 border border-amber-500/20 rounded-lg p-3">
                     <p className="text-sm text-amber-400 flex items-center gap-2">
                       <AlertTriangle className="h-4 w-4 shrink-0" />
-                      No notify number set — WhatsApp alerts are disabled.
+                      No credentials saved — captain PINs will be set but WhatsApp messages won't send.
                     </p>
                   </div>
                 )}
-              </CardContent>
-            </Card>
-
-            <Card className="bg-card border-card-border">
-              <CardHeader className="pb-4">
-                <div className="flex items-center gap-3">
-                  <div className="bg-blue-500/20 p-2 rounded-lg"><Settings className="h-5 w-5 text-blue-400" /></div>
-                  <div>
-                    <CardTitle className="text-xl">Twilio Configuration</CardTitle>
-                    <p className="text-sm text-muted-foreground mt-1">WhatsApp messages are sent via Twilio. These must be set as environment secrets.</p>
-                  </div>
-                </div>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-2">
-                  {[
-                    { key: "TWILIO_ACCOUNT_SID", label: "Account SID", hint: "Starts with AC…" },
-                    { key: "TWILIO_AUTH_TOKEN", label: "Auth Token", hint: "From your Twilio console" },
-                    { key: "TWILIO_WHATSAPP_FROM", label: "From number (optional)", hint: "Default: +14155238886 (Twilio sandbox)" },
-                  ].map(({ key, label, hint }) => (
-                    <div key={key} className="flex items-center justify-between py-2 border-b border-border last:border-0">
-                      <div>
-                        <p className="text-sm font-medium font-mono">{key}</p>
-                        <p className="text-xs text-muted-foreground">{label} — {hint}</p>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-                <p className="text-xs text-muted-foreground mt-4">Set these in the Replit Secrets panel (lock icon in the sidebar). Changes take effect after redeployment.</p>
               </CardContent>
             </Card>
           </div>

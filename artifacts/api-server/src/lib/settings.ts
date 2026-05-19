@@ -7,14 +7,28 @@ export async function getOrCreateSettings() {
   return created;
 }
 
-export async function getNotifyNumber(): Promise<string | undefined> {
+export async function getTwilioCredentials(): Promise<{ accountSid: string | null; authToken: string | null; from: string }> {
   try {
     const rows = await db
-      .select({ notifyWhatsapp: siteSettingsTable.notifyWhatsapp })
+      .select({
+        twilioAccountSid: siteSettingsTable.twilioAccountSid,
+        twilioAuthToken: siteSettingsTable.twilioAuthToken,
+        twilioWhatsappFrom: siteSettingsTable.twilioWhatsappFrom,
+      })
       .from(siteSettingsTable)
       .limit(1);
-    const fromDb = rows[0]?.notifyWhatsapp;
-    if (fromDb) return fromDb;
+    const row = rows[0];
+    if (row) {
+      return {
+        accountSid: row.twilioAccountSid ?? process.env.TWILIO_ACCOUNT_SID ?? null,
+        authToken: row.twilioAuthToken ?? process.env.TWILIO_AUTH_TOKEN ?? null,
+        from: row.twilioWhatsappFrom ?? process.env.TWILIO_WHATSAPP_FROM ?? "+14155238886",
+      };
+    }
   } catch {}
-  return process.env.NOTIFY_WHATSAPP_NUMBER ?? undefined;
+  return {
+    accountSid: process.env.TWILIO_ACCOUNT_SID ?? null,
+    authToken: process.env.TWILIO_AUTH_TOKEN ?? null,
+    from: process.env.TWILIO_WHATSAPP_FROM ?? "+14155238886",
+  };
 }

@@ -1,8 +1,6 @@
 import { Router } from "express";
 import { db, volunteersTable } from "@workspace/db";
 import { eq, desc } from "drizzle-orm";
-import { sendWhatsApp, volunteerMessage } from "../lib/whatsapp";
-import { getNotifyNumber } from "../lib/settings";
 
 const router = Router();
 
@@ -25,8 +23,6 @@ router.post("/volunteers", async (req, res) => {
       .insert(volunteersTable)
       .values({ fullName, street, phone, email, motivation: motivation || null })
       .returning();
-
-    void getNotifyNumber().then(to => sendWhatsApp(volunteerMessage(fullName, street, phone), to)).catch(() => {});
 
     res.status(201).json(created);
   } catch (err) {
