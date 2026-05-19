@@ -43,3 +43,17 @@ export type InsertStreetCaptain = z.infer<typeof insertStreetCaptainSchema>;
 export const insertCommitmentSchema = createInsertSchema(commitmentsTable).omit({ id: true, submittedAt: true });
 export type Commitment = typeof commitmentsTable.$inferSelect;
 export type InsertCommitment = z.infer<typeof insertCommitmentSchema>;
+
+export const volunteersTable = pgTable("volunteers", {
+  id: serial("id").primaryKey(),
+  fullName: text("full_name").notNull(),
+  street: text("street").notNull(),
+  phone: text("phone").notNull(),
+  email: text("email").notNull(),
+  motivation: text("motivation"),
+  submittedAt: timestamp("submitted_at").notNull().defaultNow(),
+});
+
+export const insertVolunteerSchema = createInsertSchema(volunteersTable).omit({ id: true, submittedAt: true });
+export type Volunteer = typeof volunteersTable.$inferSelect;
+export type InsertVolunteer = z.infer<typeof insertVolunteerSchema>;

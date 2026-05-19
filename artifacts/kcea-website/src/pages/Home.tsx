@@ -7,6 +7,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
@@ -74,6 +75,10 @@ export default function Home() {
   const [formData, setFormData] = useState({
     fullName: "", email: "", phone: "", street: "", houseNumber: "", commitmentType: "monthly",
   });
+  const [volunteerSubmitted, setVolunteerSubmitted] = useState(false);
+  const [volunteerForm, setVolunteerForm] = useState({
+    fullName: "", street: "", phone: "", email: "", motivation: "",
+  });
   const { toast } = useToast();
 
   const { data: stats = DEFAULT_STATS } = useQuery<SiteStats>({
@@ -103,6 +108,24 @@ export default function Home() {
     toast({
       title: "Commitment received!",
       description: "Thank you for supporting the KCEA project. We will be in touch.",
+    });
+  };
+
+  const handleVolunteerSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      await fetch(`${BASE}/api/volunteers`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(volunteerForm),
+      });
+    } catch {
+      // silently ignore network errors
+    }
+    setVolunteerSubmitted(true);
+    toast({
+      title: "Thanks for putting your hand up!",
+      description: "The KCEA committee will be in touch shortly.",
     });
   };
 
@@ -441,6 +464,107 @@ export default function Home() {
               </motion.div>
             ))}
           </div>
+        </section>
+
+        {/* Volunteer Section */}
+        <section id="volunteer" className="max-w-3xl mx-auto">
+          <div className="text-center space-y-4 mb-10">
+            <Badge className="bg-primary/20 text-primary border-primary/20" variant="outline">Get Involved</Badge>
+            <h2 className="text-3xl md:text-4xl font-bold">Is Your Street Missing a Captain?</h2>
+            <p className="text-muted-foreground leading-relaxed max-w-xl mx-auto">
+              Street captains do door-to-door visits, answer neighbour questions, and report commitment numbers back to the committee. It takes about 2–3 hours per month.
+            </p>
+          </div>
+
+          <Card className="bg-card border-card-border">
+            <CardContent className="p-8">
+              {volunteerSubmitted ? (
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.97 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  className="text-center py-10 space-y-4"
+                >
+                  <div className="flex justify-center">
+                    <div className="bg-primary/20 rounded-full p-5">
+                      <Check className="h-10 w-10 text-primary" />
+                    </div>
+                  </div>
+                  <h3 className="text-2xl font-bold">Thanks for putting your hand up!</h3>
+                  <p className="text-muted-foreground max-w-sm mx-auto">
+                    The KCEA committee will reach out to you shortly to discuss next steps.
+                  </p>
+                </motion.div>
+              ) : (
+                <form onSubmit={handleVolunteerSubmit} className="space-y-6">
+                  <div className="grid md:grid-cols-2 gap-6">
+                    <div className="space-y-2">
+                      <Label htmlFor="vol-fullName">Full Name</Label>
+                      <Input
+                        id="vol-fullName"
+                        required
+                        placeholder="Jane Dlamini"
+                        className="bg-background border-border"
+                        value={volunteerForm.fullName}
+                        onChange={e => setVolunteerForm(p => ({ ...p, fullName: e.target.value }))}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="vol-street">Street You Want to Captain</Label>
+                      <Input
+                        id="vol-street"
+                        required
+                        placeholder="Derby Road"
+                        className="bg-background border-border"
+                        value={volunteerForm.street}
+                        onChange={e => setVolunteerForm(p => ({ ...p, street: e.target.value }))}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="vol-phone">Cell Number</Label>
+                      <Input
+                        id="vol-phone"
+                        type="tel"
+                        required
+                        placeholder="082 123 4567"
+                        className="bg-background border-border"
+                        value={volunteerForm.phone}
+                        onChange={e => setVolunteerForm(p => ({ ...p, phone: e.target.value }))}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="vol-email">Email Address</Label>
+                      <Input
+                        id="vol-email"
+                        type="email"
+                        required
+                        placeholder="jane@example.com"
+                        className="bg-background border-border"
+                        value={volunteerForm.email}
+                        onChange={e => setVolunteerForm(p => ({ ...p, email: e.target.value }))}
+                      />
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="vol-motivation">
+                      Why do you want to help? <span className="text-muted-foreground text-xs">(optional)</span>
+                    </Label>
+                    <Textarea
+                      id="vol-motivation"
+                      placeholder="Tell us a little about why you'd like to get involved…"
+                      rows={3}
+                      className="bg-background border-border resize-none"
+                      value={volunteerForm.motivation}
+                      onChange={e => setVolunteerForm(p => ({ ...p, motivation: e.target.value }))}
+                    />
+                  </div>
+                  <Button type="submit" className="w-full bg-primary text-primary-foreground hover:bg-primary/90 h-12 text-base font-semibold">
+                    <Shield className="mr-2 h-5 w-5" />
+                    Volunteer as Street Captain
+                  </Button>
+                </form>
+              )}
+            </CardContent>
+          </Card>
         </section>
 
         {/* FAQ Section */}

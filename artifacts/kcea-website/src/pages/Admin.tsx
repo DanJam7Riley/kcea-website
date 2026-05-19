@@ -13,7 +13,7 @@ import { Badge } from "@/components/ui/badge";
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 
 const STATUS_OPTIONS = ["Strong", "Good", "Solid", "Steady", "In Progress", "Re-engaged", "Critical"];
-const TABS = ["submissions", "stats", "captains"] as const;
+const TABS = ["submissions", "stats", "captains", "volunteers"] as const;
 type Tab = typeof TABS[number];
 
 interface SiteStats {
@@ -41,6 +41,16 @@ interface Commitment {
   street: string;
   houseNumber: string;
   commitmentType: string;
+  submittedAt: string;
+}
+
+interface Volunteer {
+  id: number;
+  fullName: string;
+  street: string;
+  phone: string;
+  email: string;
+  motivation: string | null;
   submittedAt: string;
 }
 
@@ -96,6 +106,16 @@ export default function Admin() {
     enabled: authed,
   });
 
+  const { data: volunteers = [], isLoading: volunteersLoading } = useQuery<Volunteer[]>({
+    queryKey: ["volunteers"],
+    queryFn: () =>
+      fetch(`${BASE}/api/volunteers`, { headers: authHeaders }).then(async r => {
+        if (!r.ok) throw new Error("Unauthorized");
+        return r.json();
+      }),
+    enabled: authed,
+  });
+
   const updateStats = useMutation({
     mutationFn: (data: Partial<SiteStats>) =>
       fetch(`${BASE}/api/stats`, {
@@ -131,6 +151,13 @@ export default function Admin() {
       fetch(`${BASE}/api/commitments/${id}`, { method: "DELETE", headers: authHeaders })
         .then(async r => { if (!r.ok) throw new Error(await r.text()); return r.json(); }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["commitments"] }),
+  });
+
+  const deleteVolunteer = useMutation({
+    mutationFn: (id: number) =>
+      fetch(`${BASE}/api/volunteers/${id}`, { method: "DELETE", headers: authHeaders })
+        .then(async r => { if (!r.ok) throw new Error(await r.text()); return r.json(); }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["volunteers"] }),
   });
 
   const handleLogin = async (e: React.FormEvent) => {
@@ -268,7 +295,7 @@ export default function Admin() {
 
         {/* Tabs */}
         <div className="flex gap-1 border-b border-border">
-          {([ ["submissions", ClipboardList, "Submissions"], ["stats", BarChart3, "Stats"], ["captains", Users, "Captains"] ] as const).map(([tab, Icon, label]) => (
+          {([ ["submissions", ClipboardList, "Submissions"], ["stats", BarChart3, "Stats"], ["captains", Users, "Captains"], ["volunteers", Shield, "Volunteers"] ] as const).map(([tab, Icon, label]) => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
@@ -282,6 +309,9 @@ export default function Admin() {
               {label}
               {tab === "submissions" && commitments.length > 0 && (
                 <span className="bg-primary/20 text-primary text-xs px-1.5 py-0.5 rounded-full">{commitments.length}</span>
+              )}
+              {tab === "volunteers" && volunteers.length > 0 && (
+                <span className="bg-green-500/20 text-green-400 text-xs px-1.5 py-0.5 rounded-full">{volunteers.length}</span>
               )}
             </button>
           ))}
@@ -556,6 +586,69 @@ export default function Admin() {
             </CardContent>
           </Card>
         )}
+        {/* Volunteers Tab */}
+        {activeTab === "volunteers" && (
+          <Card className="bg-card border-card-border">
+            <CardHeader>
+              <CardTitle className="text-xl">Volunteer Applications</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {volunteersLoading ? (
+                <p className="text-muted-foreground text-sm">Loading…</p>
+              ) : volunteers.length === 0 ? (
+                <div className="text-center py-12 space-y-2">
+                  <Users className="h-10 w-10 text-muted-foreground/40 mx-auto" />
+                  <p className="text-muted-foreground text-sm">No volunteer applications yet. They'll appear here when residents submit the volunteer form.</p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  <div className="grid grid-cols-12 gap-3 px-3 py-2 text-xs font-medium text-muted-foreground uppercase tracking-wide border-b border-border">
+                    <div className="col-span-3">Name</div>
+                    <div className="col-span-2">Street to Captain</div>
+                    <div className="col-span-3">Contact</div>
+                    <div className="col-span-3">Why they want to help</div>
+                    <div className="col-span-1"></div>
+                  </div>
+                  {volunteers.map(v => (
+                    <div key={v.id} className="grid grid-cols-12 gap-3 items-start px-3 py-3 rounded-lg bg-background/50 border border-border hover:border-border/80 transition-colors">
+                      <div className="col-span-3">
+                        <p className="font-medium text-sm">{v.fullName}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {new Date(v.submittedAt).toLocaleDateString("en-ZA", { day: "2-digit", month: "short", year: "numeric" })}
+                        </p>
+                      </div>
+                      <div className="col-span-2">
+                        <p className="text-sm">{v.street}</p>
+                      </div>
+                      <div className="col-span-3 min-w-0">
+                        <p className="text-xs truncate">{v.email}</p>
+                        <p className="text-xs text-muted-foreground">{v.phone}</p>
+                      </div>
+                      <div className="col-span-3">
+                        <p className="text-xs text-muted-foreground leading-relaxed">
+                          {v.motivation ?? <span className="italic">No message provided</span>}
+                        </p>
+                      </div>
+                      <div className="col-span-1 flex justify-end">
+                        <button
+                          onClick={() => {
+                            if (confirm(`Remove application from ${v.fullName}?`)) deleteVolunteer.mutate(v.id);
+                          }}
+                          className="text-muted-foreground hover:text-red-400 transition-colors p-1 rounded"
+                          title="Delete"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                  <p className="text-xs text-muted-foreground pt-1">{volunteers.length} volunteer application{volunteers.length !== 1 ? "s" : ""}</p>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        )}
+
       </main>
     </div>
   );
