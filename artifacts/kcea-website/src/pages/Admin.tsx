@@ -380,7 +380,7 @@ export default function Admin() {
     const emailIdx = colIndex(["email", "emailaddress"]);
     const phoneIdx = colIndex(["phone", "cellnumber", "cell", "mobile"]);
     const typeIdx = colIndex(["commitmenttype", "type", "paymenttype"]);
-    const dateIdx = colIndex(["datesubmitted", "date", "submitteddate", "submittedat"]);
+    const dateIdx = colIndex(["datesubmitted", "date", "submitteddate", "submittedat", "datesigned"]);
 
     return lines.slice(1).map(line => {
       const cols = parseRow(line);
