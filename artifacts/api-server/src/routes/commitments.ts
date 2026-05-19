@@ -41,10 +41,12 @@ router.get("/commitments/lookup", async (req, res) => {
   }
 
   try {
-    // Search by name (partial, case-insensitive) OR street + house combination
+    // Search by name (partial, case-insensitive)
     const rows = await db
       .select({
         fullName: commitmentsTable.fullName,
+        email: commitmentsTable.email,
+        phone: commitmentsTable.phone,
         street: commitmentsTable.street,
         houseNumber: commitmentsTable.houseNumber,
         paymentConfirmed: commitmentsTable.paymentConfirmed,
@@ -58,17 +60,55 @@ router.get("/commitments/lookup", async (req, res) => {
       return;
     }
 
-    // Return the best match — payment confirmed if any match has it
+    const isIncomplete = (r: typeof rows[0]) => {
+      const badPhone = !r.phone || r.phone.trim() === "" || r.phone.trim() === "-";
+      const badEmail = !r.email || r.email.trim() === "" || r.email.toLowerCase() === "imported@kcea.local";
+      const badName = !r.fullName || r.fullName.trim() === "";
+      return badPhone || badEmail || badName;
+    };
+
     const confirmed = rows.some(r => r.paymentConfirmed);
+    const incomplete = rows.some(isIncomplete);
     res.json({
       found: true,
       paymentConfirmed: confirmed,
+      incomplete,
       count: rows.length,
       names: rows.map(r => `${r.fullName} — ${r.street} No. ${r.houseNumber}`),
     });
   } catch (err) {
     req.log.error(err);
     res.status(500).json({ error: "Lookup failed" });
+  }
+});
+
+router.get("/commitments/incomplete", async (req, res) => {
+  const password = req.headers["x-admin-password"] as string;
+  const adminPassword = process.env.ADMIN_PASSWORD ?? "kcea2026";
+  if (!password || password !== adminPassword) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+  try {
+    const rows = await db
+      .select()
+      .from(commitmentsTable)
+      .orderBy(desc(commitmentsTable.submittedAt));
+
+    const incomplete = rows
+      .map(r => {
+        const missing: string[] = [];
+        if (!r.fullName || r.fullName.trim() === "") missing.push("Name");
+        if (!r.phone || r.phone.trim() === "" || r.phone.trim() === "-") missing.push("Phone");
+        if (!r.email || r.email.trim() === "" || r.email.toLowerCase() === "imported@kcea.local") missing.push("Email");
+        return { ...r, missingFields: missing };
+      })
+      .filter(r => r.missingFields.length > 0);
+
+    res.json(incomplete);
+  } catch (err) {
+    req.log.error(err);
+    res.status(500).json({ error: "Failed to fetch incomplete records" });
   }
 });
 

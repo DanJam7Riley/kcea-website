@@ -91,6 +91,7 @@ export default function Home() {
   const [lookupResult, setLookupResult] = useState<{
     found: boolean;
     paymentConfirmed?: boolean;
+    incomplete?: boolean;
     names?: string[];
   } | null>(null);
 
@@ -104,7 +105,7 @@ export default function Home() {
     setLookupResult(null);
     try {
       const res = await fetch(`${BASE}/api/commitments/lookup?q=${encodeURIComponent(q)}`);
-      const data = await res.json() as { found: boolean; paymentConfirmed?: boolean; names?: string[] };
+      const data = await res.json() as { found: boolean; paymentConfirmed?: boolean; incomplete?: boolean; names?: string[] };
       setLookupResult(data);
     } catch {
       toast({ title: "Lookup failed", description: "Please try again.", variant: "destructive" });
@@ -490,27 +491,33 @@ export default function Home() {
                   <div className={`rounded-lg px-4 py-3 flex items-start gap-3 text-sm border ${
                     !lookupResult.found
                       ? "bg-red-500/10 border-red-500/30 text-red-300"
-                      : lookupResult.paymentConfirmed
-                        ? "bg-green-500/10 border-green-500/30 text-green-300"
-                        : "bg-amber-500/10 border-amber-500/30 text-amber-300"
+                      : lookupResult.incomplete
+                        ? "bg-amber-500/10 border-amber-500/30 text-amber-300"
+                        : lookupResult.paymentConfirmed
+                          ? "bg-green-500/10 border-green-500/30 text-green-300"
+                          : "bg-amber-500/10 border-amber-500/30 text-amber-300"
                   }`}>
                     <span className="text-base leading-none mt-0.5">
-                      {!lookupResult.found ? "✗" : lookupResult.paymentConfirmed ? "✓" : "⚠"}
+                      {!lookupResult.found ? "✗" : lookupResult.incomplete ? "⚠" : lookupResult.paymentConfirmed ? "✓" : "⚠"}
                     </span>
                     <div className="space-y-1">
                       <p className="font-medium">
                         {!lookupResult.found
                           ? "We don't have a record for you."
-                          : lookupResult.paymentConfirmed
-                            ? "You're on the list — thank you for your commitment!"
-                            : "We have your name but no payment recorded yet."}
+                          : lookupResult.incomplete
+                            ? "We have a partial record for your address, but some details are missing."
+                            : lookupResult.paymentConfirmed
+                              ? "You're on the list — thank you for your commitment!"
+                              : "We have your name but no payment recorded yet."}
                       </p>
                       <p className="text-xs opacity-80">
                         {!lookupResult.found
                           ? "Please submit the commitment form above or contact your street captain."
-                          : lookupResult.paymentConfirmed
-                            ? `Found: ${lookupResult.names?.join("; ")}`
-                            : "Your street captain will be in touch to confirm payment."}
+                          : lookupResult.incomplete
+                            ? "Please contact your street captain or email jomartins111@gmail.com to complete your registration."
+                            : lookupResult.paymentConfirmed
+                              ? `Found: ${lookupResult.names?.join("; ")}`
+                              : "Your street captain will be in touch to confirm payment."}
                       </p>
                     </div>
                   </div>

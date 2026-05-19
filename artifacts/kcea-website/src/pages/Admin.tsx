@@ -2,7 +2,7 @@ import { useState, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Shield, Save, LogIn, AlertTriangle, CheckCircle, Check, Key,
-  Trash2, Download, Upload, Users, ClipboardList, BarChart3, Search, MessageSquare, Settings, RefreshCw, Phone
+  Trash2, Download, Upload, Users, ClipboardList, BarChart3, Search, MessageSquare, Settings, RefreshCw, Phone, ExternalLink
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -13,8 +13,30 @@ import { Badge } from "@/components/ui/badge";
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 
 const STATUS_OPTIONS = ["Strong", "Good", "Solid", "Steady", "In Progress", "Re-engaged", "Critical"];
-const TABS = ["submissions", "stats", "captains", "volunteers", "captain-mgmt", "settings"] as const;
+const TABS = ["submissions", "stats", "captains", "volunteers", "incomplete", "captain-mgmt", "settings"] as const;
 type Tab = typeof TABS[number];
+
+interface IncompleteCommitment {
+  id: number;
+  fullName: string;
+  email: string;
+  phone: string;
+  street: string;
+  houseNumber: string;
+  commitmentType: string;
+  submittedAt: string;
+  missingFields: string[];
+}
+
+function makeWhatsAppUrl(phone: string, missingFields: string[]): string | null {
+  const digits = phone.replace(/[\s()\-+]/g, "");
+  if (!digits || digits.length < 7) return null;
+  const normalized = digits.startsWith("0") ? "27" + digits.slice(1) : digits;
+  if (!/^\d{10,15}$/.test(normalized)) return null;
+  const fieldList = missingFields.join(" and ");
+  const msg = `Hi, this is the KCEA team. We have your commitment form on record but some details are missing. Could you please reply with your ${fieldList} so we can update our record? Thank you!`;
+  return `https://wa.me/${normalized}?text=${encodeURIComponent(msg)}`;
+}
 
 interface SiteStats {
   id: number;
@@ -163,6 +185,16 @@ export default function Admin() {
         return r.json();
       }),
     enabled: authed,
+  });
+
+  const { data: incompleteRecords = [], isLoading: incompleteLoading } = useQuery<IncompleteCommitment[]>({
+    queryKey: ["incomplete-commitments"],
+    queryFn: () =>
+      fetch(`${BASE}/api/commitments/incomplete`, { headers: authHeaders }).then(async r => {
+        if (!r.ok) throw new Error("Unauthorized");
+        return r.json();
+      }),
+    enabled: authed && activeTab === "incomplete",
   });
 
   const updateStats = useMutation({
@@ -536,7 +568,7 @@ export default function Admin() {
 
         {/* Tabs */}
         <div className="flex gap-1 border-b border-border">
-          {([ ["submissions", ClipboardList, "Submissions"], ["stats", BarChart3, "Stats"], ["captains", Users, "Captains"], ["volunteers", Shield, "Volunteers"], ["captain-mgmt", Key, "Captain Portal"], ["settings", Settings, "Settings"] ] as const).map(([tab, Icon, label]) => (
+          {([ ["submissions", ClipboardList, "Submissions"], ["stats", BarChart3, "Stats"], ["captains", Users, "Captains"], ["volunteers", Shield, "Volunteers"], ["incomplete", AlertTriangle, "Incomplete"], ["captain-mgmt", Key, "Captain Portal"], ["settings", Settings, "Settings"] ] as const).map(([tab, Icon, label]) => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
@@ -553,6 +585,9 @@ export default function Admin() {
               )}
               {tab === "volunteers" && volunteers.length > 0 && (
                 <span className="bg-green-500/20 text-green-400 text-xs px-1.5 py-0.5 rounded-full">{volunteers.length}</span>
+              )}
+              {tab === "incomplete" && incompleteRecords.length > 0 && (
+                <span className="bg-amber-500/20 text-amber-400 text-xs px-1.5 py-0.5 rounded-full">{incompleteRecords.length}</span>
               )}
             </button>
           ))}
@@ -936,6 +971,87 @@ export default function Admin() {
                     </div>
                   ))}
                   <p className="text-xs text-muted-foreground pt-1">{volunteers.length} volunteer application{volunteers.length !== 1 ? "s" : ""}</p>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Incomplete Records Tab */}
+        {activeTab === "incomplete" && (
+          <Card className="bg-card border-card-border">
+            <CardHeader>
+              <CardTitle className="text-xl">Incomplete Records</CardTitle>
+              <p className="text-sm text-muted-foreground mt-1">
+                Commitment submissions that are missing one or more fields (name, phone, or email).
+              </p>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {incompleteLoading ? (
+                <p className="text-muted-foreground text-sm">Loading…</p>
+              ) : incompleteRecords.length === 0 ? (
+                <div className="text-center py-12 space-y-2">
+                  <CheckCircle className="h-10 w-10 text-green-400/40 mx-auto" />
+                  <p className="text-muted-foreground text-sm">No incomplete records — all submissions have complete details.</p>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  <div className="grid grid-cols-12 gap-3 px-3 py-2 text-xs font-medium text-muted-foreground uppercase tracking-wide border-b border-border">
+                    <div className="col-span-3">Name</div>
+                    <div className="col-span-2">Street / House</div>
+                    <div className="col-span-2">Missing</div>
+                    <div className="col-span-3">Contact on file</div>
+                    <div className="col-span-2"></div>
+                  </div>
+                  {incompleteRecords.map(c => {
+                    const waUrl = c.phone && c.phone !== "-" ? makeWhatsAppUrl(c.phone, c.missingFields) : null;
+                    return (
+                      <div key={c.id} className="grid grid-cols-12 gap-3 items-center px-3 py-3 rounded-lg bg-background/50 border border-amber-500/20 hover:border-amber-500/30 transition-colors">
+                        <div className="col-span-3">
+                          <p className="font-medium text-sm">{c.fullName || <span className="italic text-muted-foreground">No name</span>}</p>
+                          <p className="text-xs text-muted-foreground">#{c.id} · {new Date(c.submittedAt).toLocaleDateString("en-ZA", { day: "2-digit", month: "short", year: "numeric" })}</p>
+                        </div>
+                        <div className="col-span-2">
+                          <p className="text-sm">{c.street}</p>
+                          <p className="text-xs text-muted-foreground">No. {c.houseNumber}</p>
+                        </div>
+                        <div className="col-span-2">
+                          <div className="flex flex-wrap gap-1">
+                            {c.missingFields.map(f => (
+                              <Badge key={f} className="bg-amber-500/20 text-amber-400 border-amber-500/20 text-xs" variant="outline">
+                                {f}
+                              </Badge>
+                            ))}
+                          </div>
+                        </div>
+                        <div className="col-span-3 min-w-0">
+                          {c.email && c.email !== "imported@kcea.local" ? (
+                            <p className="text-xs truncate">{c.email}</p>
+                          ) : (
+                            <p className="text-xs text-muted-foreground italic">No email</p>
+                          )}
+                          {c.phone && c.phone !== "-" ? (
+                            <p className="text-xs text-muted-foreground">{c.phone}</p>
+                          ) : (
+                            <p className="text-xs text-muted-foreground italic">No phone</p>
+                          )}
+                        </div>
+                        <div className="col-span-2 flex justify-end">
+                          {waUrl ? (
+                            <a href={waUrl} target="_blank" rel="noopener noreferrer">
+                              <Button size="sm" variant="outline" className="h-8 text-xs px-2 gap-1.5 border-green-500/40 text-green-400 hover:bg-green-500/10">
+                                <ExternalLink className="h-3 w-3" />
+                                WhatsApp
+                              </Button>
+                            </a>
+                          ) : (
+                            <span className="text-xs text-muted-foreground italic">No phone on record</span>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                  <p className="text-xs text-muted-foreground pt-1">{incompleteRecords.length} incomplete record{incompleteRecords.length !== 1 ? "s" : ""}</p>
                 </div>
               )}
             </CardContent>
