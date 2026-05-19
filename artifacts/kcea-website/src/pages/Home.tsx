@@ -82,8 +82,8 @@ export default function Home() {
   const [formData, setFormData] = useState({
     fullName: "", email: "", phone: "", street: "", houseNumber: "", commitmentType: "monthly",
   });
-  const [volunteerSubmitted, setVolunteerSubmitted] = useState(false);
-  const [volunteerForm, setVolunteerForm] = useState({
+  const [captainAppSubmitted, setCaptainAppSubmitted] = useState(false);
+  const [captainAppForm, setCaptainAppForm] = useState({
     fullName: "", street: "", phone: "", email: "", motivation: "",
   });
   const [lookupQuery, setLookupQuery] = useState("");
@@ -144,18 +144,18 @@ export default function Home() {
     });
   };
 
-  const handleVolunteerSubmit = async (e: React.FormEvent) => {
+  const handleCaptainAppSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      await fetch(`${BASE}/api/volunteers`, {
+      await fetch(`${BASE}/api/captains`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(volunteerForm),
+        body: JSON.stringify(captainAppForm),
       });
     } catch {
       // silently ignore network errors
     }
-    setVolunteerSubmitted(true);
+    setCaptainAppSubmitted(true);
     toast({
       title: "Thanks for putting your hand up!",
       description: "The KCEA committee will be in touch shortly.",
@@ -564,11 +564,11 @@ export default function Home() {
           </div>
         </section>
 
-        {/* Volunteer Section */}
+        {/* Become a Street Captain Section */}
         <section id="volunteer" className="max-w-3xl mx-auto">
           <div className="text-center space-y-4 mb-10">
             <Badge className="bg-primary/20 text-primary border-primary/20" variant="outline">Get Involved</Badge>
-            <h2 className="text-3xl md:text-4xl font-bold">Is Your Street Missing a Captain?</h2>
+            <h2 className="text-3xl md:text-4xl font-bold">Become a Street Captain</h2>
             <p className="text-muted-foreground leading-relaxed max-w-xl mx-auto">
               Street captains do door-to-door visits, answer neighbour questions, and report commitment numbers back to the committee. It takes about 2–3 hours per month.
             </p>
@@ -576,7 +576,7 @@ export default function Home() {
 
           <Card className="bg-card border-card-border">
             <CardContent className="p-8">
-              {volunteerSubmitted ? (
+              {captainAppSubmitted ? (
                 <motion.div
                   initial={{ opacity: 0, scale: 0.97 }}
                   animate={{ opacity: 1, scale: 1 }}
@@ -593,71 +593,71 @@ export default function Home() {
                   </p>
                 </motion.div>
               ) : (
-                <form onSubmit={handleVolunteerSubmit} className="space-y-6">
+                <form onSubmit={handleCaptainAppSubmit} className="space-y-6">
                   <div className="grid md:grid-cols-2 gap-6">
                     <div className="space-y-2">
-                      <Label htmlFor="vol-fullName">Full Name</Label>
+                      <Label htmlFor="cap-fullName">Full Name</Label>
                       <Input
-                        id="vol-fullName"
+                        id="cap-fullName"
                         required
                         placeholder="Jane Dlamini"
                         className="bg-background border-border"
-                        value={volunteerForm.fullName}
-                        onChange={e => setVolunteerForm(p => ({ ...p, fullName: e.target.value }))}
+                        value={captainAppForm.fullName}
+                        onChange={e => setCaptainAppForm(p => ({ ...p, fullName: e.target.value }))}
                       />
                     </div>
                     <div className="space-y-2">
-                      <Label htmlFor="vol-street">Street You Want to Captain</Label>
+                      <Label htmlFor="cap-street">Street You Want to Captain</Label>
                       <Input
-                        id="vol-street"
+                        id="cap-street"
                         required
                         placeholder="Derby Road"
                         className="bg-background border-border"
-                        value={volunteerForm.street}
-                        onChange={e => setVolunteerForm(p => ({ ...p, street: e.target.value }))}
+                        value={captainAppForm.street}
+                        onChange={e => setCaptainAppForm(p => ({ ...p, street: e.target.value }))}
                       />
                     </div>
                     <div className="space-y-2">
-                      <Label htmlFor="vol-phone">Cell Number</Label>
+                      <Label htmlFor="cap-phone">Cell Number</Label>
                       <Input
-                        id="vol-phone"
+                        id="cap-phone"
                         type="tel"
                         required
                         placeholder="082 123 4567"
                         className="bg-background border-border"
-                        value={volunteerForm.phone}
-                        onChange={e => setVolunteerForm(p => ({ ...p, phone: e.target.value }))}
+                        value={captainAppForm.phone}
+                        onChange={e => setCaptainAppForm(p => ({ ...p, phone: e.target.value }))}
                       />
                     </div>
                     <div className="space-y-2">
-                      <Label htmlFor="vol-email">Email Address</Label>
+                      <Label htmlFor="cap-email">Email Address</Label>
                       <Input
-                        id="vol-email"
+                        id="cap-email"
                         type="email"
                         required
                         placeholder="jane@example.com"
                         className="bg-background border-border"
-                        value={volunteerForm.email}
-                        onChange={e => setVolunteerForm(p => ({ ...p, email: e.target.value }))}
+                        value={captainAppForm.email}
+                        onChange={e => setCaptainAppForm(p => ({ ...p, email: e.target.value }))}
                       />
                     </div>
                   </div>
                   <div className="space-y-2">
-                    <Label htmlFor="vol-motivation">
+                    <Label htmlFor="cap-motivation">
                       Why do you want to help? <span className="text-muted-foreground text-xs">(optional)</span>
                     </Label>
                     <Textarea
-                      id="vol-motivation"
+                      id="cap-motivation"
                       placeholder="Tell us a little about why you'd like to get involved…"
                       rows={3}
                       className="bg-background border-border resize-none"
-                      value={volunteerForm.motivation}
-                      onChange={e => setVolunteerForm(p => ({ ...p, motivation: e.target.value }))}
+                      value={captainAppForm.motivation}
+                      onChange={e => setCaptainAppForm(p => ({ ...p, motivation: e.target.value }))}
                     />
                   </div>
                   <Button type="submit" className="w-full bg-primary text-primary-foreground hover:bg-primary/90 h-12 text-base font-semibold">
                     <Shield className="mr-2 h-5 w-5" />
-                    Volunteer as Street Captain
+                    Apply to Become a Street Captain
                   </Button>
                 </form>
               )}

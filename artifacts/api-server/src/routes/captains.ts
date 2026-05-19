@@ -24,25 +24,67 @@ async function getOrSeedCaptains() {
   if (rows.length > 0) return rows;
   const seeded = await db
     .insert(streetCaptainsTable)
-    .values(DEFAULT_CAPTAINS)
+    .values(DEFAULT_CAPTAINS.map(c => ({ ...c, captainStatus: "Active Captain" })))
     .returning();
   return seeded;
 }
 
+const adminPassword = () => process.env.ADMIN_PASSWORD ?? "kcea2026";
+function isAdmin(req: import("express").Request) {
+  return req.headers["x-admin-password"] === adminPassword();
+}
+
 router.get("/captains", async (req, res) => {
   try {
-    const captains = await getOrSeedCaptains();
-    res.json(captains);
+    const all = await getOrSeedCaptains();
+    if (isAdmin(req)) {
+      res.json(all);
+    } else {
+      res.json(all.filter(c => c.captainStatus === "Active Captain"));
+    }
   } catch (err) {
     req.log.error(err);
     res.status(500).json({ error: "Failed to fetch captains" });
   }
 });
 
+router.post("/captains", async (req, res) => {
+  const body = req.body as Record<string, unknown>;
+  const fullName = typeof body.fullName === "string" ? body.fullName.trim() : "";
+  const street = typeof body.street === "string" ? body.street.trim() : "";
+  const phone = typeof body.phone === "string" ? body.phone.trim() : "";
+  const email = typeof body.email === "string" ? body.email.trim() : "";
+  const motivation = typeof body.motivation === "string" ? body.motivation.trim() : undefined;
+
+  if (!fullName || !street || !phone || !email) {
+    res.status(400).json({ error: "Name, street, phone and email are required" });
+    return;
+  }
+
+  try {
+    await getOrSeedCaptains();
+    const [created] = await db
+      .insert(streetCaptainsTable)
+      .values({
+        street,
+        captain: fullName,
+        forms: 0,
+        status: "In Progress",
+        phone,
+        email,
+        motivation: motivation || null,
+        captainStatus: "Pending / New Volunteer",
+      })
+      .returning();
+    res.status(201).json(created);
+  } catch (err) {
+    req.log.error(err);
+    res.status(500).json({ error: "Failed to save application" });
+  }
+});
+
 router.put("/captains/:id", async (req, res) => {
-  const password = req.headers["x-admin-password"] as string;
-  const adminPassword = process.env.ADMIN_PASSWORD ?? "kcea2026";
-  if (!password || password !== adminPassword) {
+  if (!isAdmin(req)) {
     res.status(401).json({ error: "Unauthorized" });
     return;
   }
@@ -54,11 +96,14 @@ router.put("/captains/:id", async (req, res) => {
   }
 
   const body = req.body as Record<string, unknown>;
-  const patch: { captain?: string; forms?: number; status?: string } = {};
+  const patch: { captain?: string; forms?: number; status?: string; captainStatus?: string } = {};
 
   if (typeof body.captain === "string" && body.captain.trim()) patch.captain = body.captain.trim();
   if (typeof body.forms === "number") patch.forms = Math.max(0, Math.floor(body.forms));
   if (typeof body.status === "string" && body.status.trim()) patch.status = body.status.trim();
+  if (body.captainStatus === "Active Captain" || body.captainStatus === "Pending / New Volunteer") {
+    patch.captainStatus = body.captainStatus;
+  }
 
   if (Object.keys(patch).length === 0) {
     res.status(400).json({ error: "No valid fields provided" });

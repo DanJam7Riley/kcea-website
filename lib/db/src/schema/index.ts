@@ -13,10 +13,15 @@ export const siteStatsTable = pgTable("site_stats", {
 
 export const streetCaptainsTable = pgTable("street_captains", {
   id: serial("id").primaryKey(),
-  street: text("street").notNull().unique(),
+  street: text("street").notNull(),
   captain: text("captain").notNull(),
   forms: integer("forms").notNull().default(0),
   status: text("status").notNull(),
+  phone: text("phone"),
+  email: text("email"),
+  motivation: text("motivation"),
+  captainStatus: text("captain_status").notNull().default("Active Captain"),
+  submittedAt: timestamp("submitted_at").notNull().defaultNow(),
 });
 
 export const commitmentsTable = pgTable("commitments", {

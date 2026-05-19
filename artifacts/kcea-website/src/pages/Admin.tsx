@@ -13,7 +13,7 @@ import { Badge } from "@/components/ui/badge";
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 
 const STATUS_OPTIONS = ["Strong", "Good", "Solid", "Steady", "In Progress", "Re-engaged", "Critical"];
-const TABS = ["submissions", "stats", "captains", "volunteers", "incomplete", "captain-mgmt", "settings"] as const;
+const TABS = ["submissions", "stats", "captains", "incomplete", "captain-mgmt", "settings"] as const;
 type Tab = typeof TABS[number];
 
 interface IncompleteCommitment {
@@ -53,6 +53,11 @@ interface StreetCaptain {
   captain: string;
   forms: number;
   status: string;
+  phone: string | null;
+  email: string | null;
+  motivation: string | null;
+  captainStatus: string;
+  submittedAt: string;
 }
 
 interface Commitment {
@@ -97,16 +102,6 @@ interface CaptainNote {
   captainName: string;
   note: string;
   updatedAt: string;
-}
-
-interface Volunteer {
-  id: number;
-  fullName: string;
-  street: string;
-  phone: string;
-  email: string;
-  motivation: string | null;
-  submittedAt: string;
 }
 
 function getStatusColor(status: string) {
@@ -163,7 +158,7 @@ export default function Admin() {
 
   const { data: captains = [], isLoading: captainsLoading } = useQuery<StreetCaptain[]>({
     queryKey: ["captains"],
-    queryFn: () => fetch(`${BASE}/api/captains`).then(r => r.json()),
+    queryFn: () => fetch(`${BASE}/api/captains`, { headers: authHeaders }).then(r => r.json()),
     enabled: authed,
   });
 
@@ -171,16 +166,6 @@ export default function Admin() {
     queryKey: ["commitments"],
     queryFn: () =>
       fetch(`${BASE}/api/commitments`, { headers: authHeaders }).then(async r => {
-        if (!r.ok) throw new Error("Unauthorized");
-        return r.json();
-      }),
-    enabled: authed,
-  });
-
-  const { data: volunteers = [], isLoading: volunteersLoading } = useQuery<Volunteer[]>({
-    queryKey: ["volunteers"],
-    queryFn: () =>
-      fetch(`${BASE}/api/volunteers`, { headers: authHeaders }).then(async r => {
         if (!r.ok) throw new Error("Unauthorized");
         return r.json();
       }),
@@ -234,11 +219,14 @@ export default function Admin() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["commitments"] }),
   });
 
-  const deleteVolunteer = useMutation({
-    mutationFn: (id: number) =>
-      fetch(`${BASE}/api/volunteers/${id}`, { method: "DELETE", headers: authHeaders })
-        .then(async r => { if (!r.ok) throw new Error(await r.text()); return r.json(); }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["volunteers"] }),
+  const toggleCaptainStatus = useMutation({
+    mutationFn: ({ id, captainStatus }: { id: number; captainStatus: string }) =>
+      fetch(`${BASE}/api/captains/${id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", ...authHeaders },
+        body: JSON.stringify({ captainStatus }),
+      }).then(async r => { if (!r.ok) throw new Error(await r.text()); return r.json(); }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["captains"] }),
   });
 
   const confirmPayment = useMutation({
@@ -568,7 +556,7 @@ export default function Admin() {
 
         {/* Tabs */}
         <div className="flex gap-1 border-b border-border">
-          {([ ["submissions", ClipboardList, "Submissions"], ["stats", BarChart3, "Stats"], ["captains", Users, "Captains"], ["volunteers", Shield, "Volunteers"], ["incomplete", AlertTriangle, "Incomplete"], ["captain-mgmt", Key, "Captain Portal"], ["settings", Settings, "Settings"] ] as const).map(([tab, Icon, label]) => (
+          {([ ["submissions", ClipboardList, "Submissions"], ["stats", BarChart3, "Stats"], ["captains", Users, "Captains"], ["incomplete", AlertTriangle, "Incomplete"], ["captain-mgmt", Key, "Captain Portal"], ["settings", Settings, "Settings"] ] as const).map(([tab, Icon, label]) => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
@@ -582,9 +570,6 @@ export default function Admin() {
               {label}
               {tab === "submissions" && commitments.length > 0 && (
                 <span className="bg-primary/20 text-primary text-xs px-1.5 py-0.5 rounded-full">{commitments.length}</span>
-              )}
-              {tab === "volunteers" && volunteers.length > 0 && (
-                <span className="bg-green-500/20 text-green-400 text-xs px-1.5 py-0.5 rounded-full">{volunteers.length}</span>
               )}
               {tab === "incomplete" && incompleteRecords.length > 0 && (
                 <span className="bg-amber-500/20 text-amber-400 text-xs px-1.5 py-0.5 rounded-full">{incompleteRecords.length}</span>
@@ -834,6 +819,9 @@ export default function Admin() {
           <Card className="bg-card border-card-border">
             <CardHeader>
               <CardTitle className="text-xl">Street Captains</CardTitle>
+              <p className="text-sm text-muted-foreground mt-1">
+                Active captains appear on the homepage. Toggle a row's role to promote a pending volunteer or demote an active captain.
+              </p>
             </CardHeader>
             <CardContent>
               {captainsLoading ? (
@@ -841,10 +829,11 @@ export default function Admin() {
               ) : (
                 <div className="space-y-3">
                   <div className="grid grid-cols-12 gap-3 px-4 py-2 text-xs font-medium text-muted-foreground uppercase tracking-wide border-b border-border">
-                    <div className="col-span-3">Street</div>
-                    <div className="col-span-3">Captain</div>
-                    <div className="col-span-2">Forms</div>
-                    <div className="col-span-2">Status</div>
+                    <div className="col-span-2">Street</div>
+                    <div className="col-span-2">Captain</div>
+                    <div className="col-span-1">Forms</div>
+                    <div className="col-span-2">Activity Status</div>
+                    <div className="col-span-3">Role</div>
                     <div className="col-span-2"></div>
                   </div>
                   {captains.map(c => {
@@ -853,10 +842,12 @@ export default function Admin() {
                     const currentStatus = edit.status ?? c.status;
                     const isSaving = updateCaptain.isPending && updateCaptain.variables?.id === c.id;
                     const wasSaved = savedCaptains.has(c.id);
+                    const isActive = c.captainStatus === "Active Captain";
+                    const isToggling = toggleCaptainStatus.isPending && (toggleCaptainStatus.variables as { id: number } | undefined)?.id === c.id;
                     return (
-                      <div key={c.id} className="grid grid-cols-12 gap-3 items-center p-4 rounded-lg bg-background/50 border border-border">
-                        <div className="col-span-3 font-semibold text-sm">{c.street}</div>
-                        <div className="col-span-3">
+                      <div key={c.id} className={`grid grid-cols-12 gap-3 items-start p-4 rounded-lg bg-background/50 border transition-colors ${isActive ? "border-border" : "border-amber-500/20"}`}>
+                        <div className="col-span-2 font-semibold text-sm pt-1">{c.street}</div>
+                        <div className="col-span-2">
                           <Input
                             defaultValue={c.captain}
                             key={`cap-${c.id}-${c.captain}`}
@@ -864,8 +855,17 @@ export default function Admin() {
                             placeholder="Captain name"
                             className="bg-card border-border text-sm h-8"
                           />
+                          {!isActive && (c.phone || c.email) && (
+                            <div className="mt-1 space-y-0.5">
+                              {c.phone && <p className="text-xs text-muted-foreground">{c.phone}</p>}
+                              {c.email && <p className="text-xs text-muted-foreground truncate">{c.email}</p>}
+                            </div>
+                          )}
+                          {!isActive && c.motivation && (
+                            <p className="text-xs text-muted-foreground italic mt-1 leading-tight">{c.motivation}</p>
+                          )}
                         </div>
-                        <div className="col-span-2">
+                        <div className="col-span-1">
                           <Input
                             type="number"
                             min={0}
@@ -887,7 +887,24 @@ export default function Admin() {
                             ))}
                           </select>
                         </div>
-                        <div className="col-span-2 flex items-center gap-2">
+                        <div className="col-span-3 flex items-center pt-0.5">
+                          <button
+                            onClick={() => toggleCaptainStatus.mutate({
+                              id: c.id,
+                              captainStatus: isActive ? "Pending / New Volunteer" : "Active Captain",
+                            })}
+                            disabled={isToggling}
+                            className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium border transition-colors cursor-pointer ${
+                              isActive
+                                ? "bg-green-500/20 text-green-400 border-green-500/30 hover:bg-green-500/30"
+                                : "bg-amber-500/20 text-amber-400 border-amber-500/30 hover:bg-amber-500/30"
+                            }`}
+                          >
+                            {isToggling ? <RefreshCw className="h-3 w-3 animate-spin" /> : null}
+                            {isActive ? "Active Captain" : "Pending / New Volunteer"}
+                          </button>
+                        </div>
+                        <div className="col-span-2 flex items-center gap-2 pt-0.5">
                           <Button
                             size="sm"
                             onClick={() => { if (captainEdits[c.id]) updateCaptain.mutate({ id: c.id, data: captainEdits[c.id] }); }}
@@ -907,76 +924,13 @@ export default function Admin() {
                     );
                   })}
                   <p className="text-xs text-muted-foreground pt-2">
-                    Click <Save className="inline h-3 w-3" /> on each row after editing to save individually.
+                    Click the role badge to toggle a captain's status instantly. Click <Save className="inline h-3 w-3" /> to save name/forms/status edits.
                   </p>
                 </div>
               )}
             </CardContent>
           </Card>
         )}
-        {/* Volunteers Tab */}
-        {activeTab === "volunteers" && (
-          <Card className="bg-card border-card-border">
-            <CardHeader>
-              <CardTitle className="text-xl">Volunteer Applications</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              {volunteersLoading ? (
-                <p className="text-muted-foreground text-sm">Loading…</p>
-              ) : volunteers.length === 0 ? (
-                <div className="text-center py-12 space-y-2">
-                  <Users className="h-10 w-10 text-muted-foreground/40 mx-auto" />
-                  <p className="text-muted-foreground text-sm">No volunteer applications yet. They'll appear here when residents submit the volunteer form.</p>
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  <div className="grid grid-cols-12 gap-3 px-3 py-2 text-xs font-medium text-muted-foreground uppercase tracking-wide border-b border-border">
-                    <div className="col-span-3">Name</div>
-                    <div className="col-span-2">Street to Captain</div>
-                    <div className="col-span-3">Contact</div>
-                    <div className="col-span-3">Why they want to help</div>
-                    <div className="col-span-1"></div>
-                  </div>
-                  {volunteers.map(v => (
-                    <div key={v.id} className="grid grid-cols-12 gap-3 items-start px-3 py-3 rounded-lg bg-background/50 border border-border hover:border-border/80 transition-colors">
-                      <div className="col-span-3">
-                        <p className="font-medium text-sm">{v.fullName}</p>
-                        <p className="text-xs text-muted-foreground">
-                          {new Date(v.submittedAt).toLocaleDateString("en-ZA", { day: "2-digit", month: "short", year: "numeric" })}
-                        </p>
-                      </div>
-                      <div className="col-span-2">
-                        <p className="text-sm">{v.street}</p>
-                      </div>
-                      <div className="col-span-3 min-w-0">
-                        <p className="text-xs truncate">{v.email}</p>
-                        <p className="text-xs text-muted-foreground">{v.phone}</p>
-                      </div>
-                      <div className="col-span-3">
-                        <p className="text-xs text-muted-foreground leading-relaxed">
-                          {v.motivation ?? <span className="italic">No message provided</span>}
-                        </p>
-                      </div>
-                      <div className="col-span-1 flex justify-end">
-                        <button
-                          onClick={() => {
-                            if (confirm(`Remove application from ${v.fullName}?`)) deleteVolunteer.mutate(v.id);
-                          }}
-                          className="text-muted-foreground hover:text-red-400 transition-colors p-1 rounded"
-                          title="Delete"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                  <p className="text-xs text-muted-foreground pt-1">{volunteers.length} volunteer application{volunteers.length !== 1 ? "s" : ""}</p>
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        )}
-
         {/* Incomplete Records Tab */}
         {activeTab === "incomplete" && (
           <Card className="bg-card border-card-border">
