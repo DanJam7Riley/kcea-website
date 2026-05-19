@@ -2,7 +2,7 @@ import { useState, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Shield, Save, LogIn, AlertTriangle, CheckCircle,
-  Trash2, Download, Upload, Users, ClipboardList, BarChart3, Search
+  Trash2, Download, Upload, Users, ClipboardList, BarChart3, Search, MessageSquare
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -88,6 +88,8 @@ export default function Admin() {
   const [importResult, setImportResult] = useState<ImportResult | null>(null);
   const [importLoading, setImportLoading] = useState(false);
   const [importError, setImportError] = useState("");
+  const [testNotifyState, setTestNotifyState] = useState<"idle" | "loading" | "ok" | "unconfigured" | "error">("idle");
+  const [testNotifyDetail, setTestNotifyDetail] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const qc = useQueryClient();
@@ -169,6 +171,31 @@ export default function Admin() {
         .then(async r => { if (!r.ok) throw new Error(await r.text()); return r.json(); }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["volunteers"] }),
   });
+
+  const handleTestNotify = async () => {
+    setTestNotifyState("loading");
+    setTestNotifyDetail("");
+    try {
+      const res = await fetch(`${BASE}/api/notify/test`, {
+        method: "POST",
+        headers: authHeaders,
+      });
+      const data = await res.json() as { success?: boolean; error?: string; missing?: string[]; detail?: string };
+      if (res.ok && data.success) {
+        setTestNotifyState("ok");
+      } else if (res.status === 400 && data.missing) {
+        setTestNotifyState("unconfigured");
+        setTestNotifyDetail(`Missing: ${(data.missing as string[]).join(", ")}`);
+      } else {
+        setTestNotifyState("error");
+        setTestNotifyDetail(data.detail ?? data.error ?? "Unknown error");
+      }
+    } catch {
+      setTestNotifyState("error");
+      setTestNotifyDetail("Could not reach server");
+    }
+    setTimeout(() => setTestNotifyState("idle"), 8000);
+  };
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -339,6 +366,26 @@ export default function Admin() {
           </div>
           <div className="flex items-center gap-3">
             <a href="/" className="text-sm text-muted-foreground hover:text-primary transition-colors">← Back to site</a>
+            <div className="flex flex-col items-end gap-1">
+              <Button
+                variant="outline"
+                size="sm"
+                className={`border-border gap-2 ${
+                  testNotifyState === "ok" ? "border-green-500/50 text-green-400" :
+                  testNotifyState === "error" || testNotifyState === "unconfigured" ? "border-red-500/50 text-red-400" : ""
+                }`}
+                onClick={handleTestNotify}
+                disabled={testNotifyState === "loading"}
+              >
+                <MessageSquare className="h-4 w-4" />
+                {testNotifyState === "loading" ? "Sending…" :
+                 testNotifyState === "ok" ? "Message sent ✓" :
+                 "Test WhatsApp"}
+              </Button>
+              {(testNotifyState === "unconfigured" || testNotifyState === "error") && testNotifyDetail && (
+                <p className="text-xs text-red-400 max-w-48 text-right">{testNotifyDetail}</p>
+              )}
+            </div>
             <Button variant="outline" size="sm" className="border-border" onClick={() => { setAuthed(false); setPassword(""); }}>
               Sign Out
             </Button>

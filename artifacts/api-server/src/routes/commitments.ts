@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { db, commitmentsTable } from "@workspace/db";
 import { eq, desc, and } from "drizzle-orm";
+import { sendWhatsApp, commitmentMessage } from "../lib/whatsapp";
 
 const router = Router();
 
@@ -24,6 +25,9 @@ router.post("/commitments", async (req, res) => {
       .insert(commitmentsTable)
       .values({ fullName, email, phone, street, houseNumber, commitmentType, imported: false })
       .returning();
+
+    void sendWhatsApp(commitmentMessage(fullName, street, houseNumber, phone, commitmentType)).catch(() => {});
+
     res.status(201).json(created);
   } catch (err) {
     req.log.error(err);
