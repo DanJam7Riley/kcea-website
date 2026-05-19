@@ -1,8 +1,6 @@
 import { Router } from "express";
 import { db, streetCaptainsTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
-import { sendWhatsApp, adminCaptainApplicationMsg } from "../lib/whatsapp";
-import { getNotifyNumber, normalizeSAPhone } from "../lib/settings";
 
 const router = Router();
 
@@ -78,11 +76,6 @@ router.post("/captains", async (req, res) => {
         captainStatus: "Pending / New Volunteer",
       })
       .returning();
-
-    getNotifyNumber().then(adminNumber => {
-      if (!adminNumber) return;
-      sendWhatsApp(adminCaptainApplicationMsg(fullName, street, phone, email), adminNumber).catch(() => {});
-    }).catch(() => {});
 
     res.status(201).json(created);
   } catch (err) {

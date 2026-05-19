@@ -2,7 +2,7 @@ import { useState, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Shield, Save, LogIn, AlertTriangle, CheckCircle, Check, Key,
-  Trash2, Download, Upload, Users, ClipboardList, BarChart3, Search, MessageSquare, Settings, RefreshCw, Phone, ExternalLink
+  Trash2, Download, Upload, Users, ClipboardList, BarChart3, Search, MessageSquare, RefreshCw, Phone, ExternalLink
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -13,7 +13,7 @@ import { Badge } from "@/components/ui/badge";
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 
 const STATUS_OPTIONS = ["Strong", "Good", "Solid", "Steady", "In Progress", "Re-engaged", "Critical"];
-const TABS = ["submissions", "stats", "captains", "incomplete", "captain-mgmt", "settings"] as const;
+const TABS = ["submissions", "stats", "captains", "incomplete", "captain-mgmt"] as const;
 type Tab = typeof TABS[number];
 
 interface IncompleteCommitment {
@@ -95,14 +95,6 @@ interface CaptainProfile {
   lastLoginAt: string | null;
 }
 
-interface SiteSettings {
-  id: number;
-  twilioAccountSid: string | null;
-  twilioAuthToken: string | null;
-  twilioWhatsappFrom: string | null;
-  notifyWhatsapp: string | null;
-  updatedAt: string;
-}
 
 interface CaptainNote {
   id: number;
@@ -147,11 +139,6 @@ export default function Admin() {
   const [newProfileName, setNewProfileName] = useState("");
   const [newProfilePhone, setNewProfilePhone] = useState("");
   const [showAddProfile, setShowAddProfile] = useState(false);
-  const [settingsSid, setSettingsSid] = useState<string | null>(null);
-  const [settingsToken, setSettingsToken] = useState<string | null>(null);
-  const [settingsFrom, setSettingsFrom] = useState<string | null>(null);
-  const [settingsNotify, setSettingsNotify] = useState<string | null>(null);
-  const [settingsSaved, setSettingsSaved] = useState(false);
   const [setPinLoading, setSetPinLoading] = useState<Set<number>>(new Set());
   const [setPinResult, setSetPinResult] = useState<Record<number, { pin: string; sent: boolean }>>({});
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -300,27 +287,6 @@ export default function Admin() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["captain-profiles"] }),
   });
 
-  const { data: siteSettings } = useQuery<SiteSettings>({
-    queryKey: ["site-settings"],
-    queryFn: () => fetch(`${BASE}/api/settings`, { headers: authHeaders }).then(async r => {
-      if (!r.ok) throw new Error(await r.text()); return r.json();
-    }),
-    enabled: authed && activeTab === "settings",
-  });
-
-  const saveSettings = useMutation({
-    mutationFn: (data: { twilioAccountSid: string; twilioAuthToken: string; twilioWhatsappFrom: string; notifyWhatsapp: string }) =>
-      fetch(`${BASE}/api/settings`, {
-        method: "PUT",
-        headers: { ...authHeaders, "Content-Type": "application/json" },
-        body: JSON.stringify(data),
-      }).then(async r => { if (!r.ok) throw new Error(await r.text()); return r.json(); }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["site-settings"] });
-      setSettingsSaved(true);
-      setTimeout(() => setSettingsSaved(false), 3000);
-    },
-  });
 
   const handleSetPin = async (id: number) => {
     setSetPinLoading(prev => new Set([...prev, id]));
@@ -329,9 +295,9 @@ export default function Admin() {
         method: "POST",
         headers: authHeaders,
       });
-      const data = await res.json() as { pin?: string; whatsappSent?: boolean };
+      const data = await res.json() as { pin?: string };
       if (res.ok && data.pin) {
-        setSetPinResult(prev => ({ ...prev, [id]: { pin: data.pin!, sent: !!data.whatsappSent } }));
+        setSetPinResult(prev => ({ ...prev, [id]: { pin: data.pin!, sent: false } }));
         qc.invalidateQueries({ queryKey: ["captain-profiles"] });
         setTimeout(() => setSetPinResult(prev => { const n = { ...prev }; delete n[id]; return n; }), 10000);
       }
@@ -566,7 +532,7 @@ export default function Admin() {
 
         {/* Tabs */}
         <div className="flex gap-1 border-b border-border">
-          {([ ["submissions", ClipboardList, "Submissions"], ["stats", BarChart3, "Stats"], ["captains", Users, "Captains"], ["incomplete", AlertTriangle, "Incomplete"], ["captain-mgmt", Key, "Captain Portal"], ["settings", Settings, "Settings"] ] as const).map(([tab, Icon, label]) => (
+          {([ ["submissions", ClipboardList, "Submissions"], ["stats", BarChart3, "Stats"], ["captains", Users, "Captains"], ["incomplete", AlertTriangle, "Incomplete"], ["captain-mgmt", Key, "Captain Portal"] ] as const).map(([tab, Icon, label]) => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
@@ -667,16 +633,16 @@ export default function Admin() {
                 <div className="space-y-2">
                   {/* Header row */}
                   <div className="grid grid-cols-12 gap-3 px-3 py-2 text-xs font-medium text-muted-foreground uppercase tracking-wide border-b border-border">
-                    <div className="col-span-3">Name</div>
+                    <div className="col-span-2">Name</div>
                     <div className="col-span-2">Street / House</div>
-                    <div className="col-span-3">Contact</div>
+                    <div className="col-span-2">Contact</div>
                     <div className="col-span-2">Type</div>
                     <div className="col-span-1">Date</div>
-                    <div className="col-span-1"></div>
+                    <div className="col-span-3"></div>
                   </div>
                   {filtered.map(c => (
                     <div key={c.id} className="grid grid-cols-12 gap-3 items-center px-3 py-3 rounded-lg bg-background/50 border border-border hover:border-border/80 transition-colors">
-                      <div className="col-span-3">
+                      <div className="col-span-2">
                         <p className="font-medium text-sm">{c.fullName}</p>
                         <p className="text-xs text-muted-foreground">#{c.id}</p>
                       </div>
@@ -684,7 +650,7 @@ export default function Admin() {
                         <p className="text-sm">{c.street}</p>
                         <p className="text-xs text-muted-foreground">No. {c.houseNumber}</p>
                       </div>
-                      <div className="col-span-3 min-w-0">
+                      <div className="col-span-2 min-w-0">
                         <p className="text-xs truncate">{c.email}</p>
                         <p className="text-xs text-muted-foreground">{c.phone}</p>
                       </div>
@@ -702,7 +668,16 @@ export default function Admin() {
                           {new Date(c.submittedAt).toLocaleDateString("en-ZA", { day: "2-digit", month: "short" })}
                         </p>
                       </div>
-                      <div className="col-span-1 flex justify-end gap-1">
+                      <div className="col-span-3 flex items-center justify-end gap-1">
+                        {(() => {
+                          const msg = `Hi ${c.fullName}, thank you for committing to the KCEA enclosure project! Your details have been recorded for ${c.street}, No. ${c.houseNumber}. We will be in touch with payment information soon. KCEA Team.`;
+                          const url = makeResidentWaUrl(c.phone, msg);
+                          return url ? (
+                            <a href={url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 px-2 py-1 rounded text-xs text-green-400 bg-green-500/10 border border-green-500/20 hover:bg-green-500/20 transition-colors whitespace-nowrap" title="Send thank-you WhatsApp to resident">
+                              <MessageSquare className="h-3 w-3" />WhatsApp Resident
+                            </a>
+                          ) : null;
+                        })()}
                         <button
                           onClick={() => confirmPayment.mutate({ id: c.id, paymentConfirmed: !c.paymentConfirmed })}
                           className={`transition-colors p-1 rounded ${c.paymentConfirmed ? "text-green-400 hover:text-muted-foreground" : "text-muted-foreground hover:text-green-400"}`}
@@ -918,7 +893,7 @@ export default function Admin() {
                             const url = makeResidentWaUrl(c.phone, msg);
                             return url ? (
                               <a href={url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs text-green-400 bg-green-500/10 border border-green-500/20 hover:bg-green-500/20 transition-colors">
-                                <MessageSquare className="h-3 w-3" />Thank-you WhatsApp
+                                <MessageSquare className="h-3 w-3" />WhatsApp Applicant
                               </a>
                             ) : null;
                           })()}
@@ -1144,16 +1119,30 @@ export default function Admin() {
                               <Label className="text-xs flex items-center gap-1"><Key className="h-3 w-3" /> Portal PIN</Label>
                               <div className="flex items-center gap-2">
                                 {pinResult ? (
-                                  <div className="flex items-center gap-2">
+                                  <div className="flex items-center gap-2 flex-wrap">
                                     <span className="font-mono text-lg font-bold text-primary tracking-[0.3em] bg-primary/10 px-3 py-1 rounded-md">{pinResult.pin}</span>
-                                    <span className="text-xs text-green-400 flex items-center gap-1">
-                                      <CheckCircle className="h-3 w-3" />
-                                      {pinResult.sent ? "Sent via WhatsApp" : "PIN set (no phone)"}
-                                    </span>
+                                    {p.phone && (() => {
+                                      const msg = `Hi ${p.name}, your KCEA Captain Portal login: attached-assets-janineriley.replit.app/captain-login | Username: ${p.name} | PIN: ${pinResult.pin}. Keep your PIN private. Questions? WhatsApp 0832355052.`;
+                                      const url = makeResidentWaUrl(p.phone, msg);
+                                      return url ? (
+                                        <a href={url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs text-green-400 bg-green-500/10 border border-green-500/20 hover:bg-green-500/20 transition-colors">
+                                          <MessageSquare className="h-3 w-3" />Send PIN via WhatsApp
+                                        </a>
+                                      ) : null;
+                                    })()}
                                   </div>
                                 ) : p.pin ? (
-                                  <div className="flex items-center gap-2">
+                                  <div className="flex items-center gap-2 flex-wrap">
                                     <span className="font-mono text-lg font-bold text-foreground tracking-[0.3em] bg-background border border-border px-3 py-1 rounded-md">{p.pin}</span>
+                                    {p.phone && (() => {
+                                      const msg = `Hi ${p.name}, your KCEA Captain Portal login: attached-assets-janineriley.replit.app/captain-login | Username: ${p.name} | PIN: ${p.pin}. Keep your PIN private. Questions? WhatsApp 0832355052.`;
+                                      const url = makeResidentWaUrl(p.phone, msg);
+                                      return url ? (
+                                        <a href={url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs text-green-400 bg-green-500/10 border border-green-500/20 hover:bg-green-500/20 transition-colors">
+                                          <MessageSquare className="h-3 w-3" />Send PIN via WhatsApp
+                                        </a>
+                                      ) : null;
+                                    })()}
                                     <Button
                                       size="sm"
                                       variant="outline"
@@ -1178,10 +1167,10 @@ export default function Admin() {
                                 )}
                               </div>
                               {!pinResult && p.pin && (
-                                <p className="text-xs text-muted-foreground">Reset generates a new random PIN and sends it via WhatsApp</p>
+                                <p className="text-xs text-muted-foreground">Reset generates a new random PIN. Use 'Send PIN via WhatsApp' to message the captain.</p>
                               )}
                               {!pinResult && !p.pin && (
-                                <p className="text-xs text-muted-foreground">Generates a random 4-digit PIN and sends via WhatsApp</p>
+                                <p className="text-xs text-muted-foreground">Generates a random 4-digit PIN. Use 'Send PIN via WhatsApp' to send it to the captain.</p>
                               )}
                             </div>
                           </div>
@@ -1237,139 +1226,6 @@ export default function Admin() {
           </div>
         )}
 
-        {activeTab === "settings" && (
-          <div className="space-y-6 max-w-2xl">
-            <Card className="bg-card border-card-border">
-              <CardHeader className="pb-4">
-                <div className="flex items-center gap-3">
-                  <div className="bg-green-500/20 p-2 rounded-lg"><MessageSquare className="h-5 w-5 text-green-400" /></div>
-                  <div>
-                    <CardTitle className="text-xl">Admin Notification Number</CardTitle>
-                    <p className="text-sm text-muted-foreground mt-1">WhatsApp number that receives automatic notifications when new commitments or captain applications come in. Stored securely — never shown on the public site.</p>
-                  </div>
-                </div>
-              </CardHeader>
-              <CardContent className="space-y-5">
-                <div className="space-y-2">
-                  <Label htmlFor="notify-wa">Admin WhatsApp Number</Label>
-                  <Input
-                    id="notify-wa"
-                    value={settingsNotify ?? siteSettings?.notifyWhatsapp ?? ""}
-                    onChange={e => setSettingsNotify(e.target.value)}
-                    placeholder="0832355052"
-                    className="bg-background border-border font-mono text-sm"
-                  />
-                  <p className="text-xs text-muted-foreground">South African mobile number (e.g. 0832355052). Normalised to +27 format automatically.</p>
-                </div>
-                <div className="flex items-center gap-3 pt-1">
-                  <Button
-                    onClick={() => saveSettings.mutate({
-                      twilioAccountSid: settingsSid ?? siteSettings?.twilioAccountSid ?? "",
-                      twilioAuthToken: settingsToken ?? siteSettings?.twilioAuthToken ?? "",
-                      twilioWhatsappFrom: settingsFrom ?? siteSettings?.twilioWhatsappFrom ?? "",
-                      notifyWhatsapp: settingsNotify ?? siteSettings?.notifyWhatsapp ?? "",
-                    })}
-                    disabled={saveSettings.isPending}
-                    className="bg-primary text-primary-foreground hover:bg-primary/90 gap-2"
-                  >
-                    <Save className="h-4 w-4" />
-                    {saveSettings.isPending ? "Saving…" : "Save number"}
-                  </Button>
-                  {settingsSaved && (
-                    <span className="text-sm text-green-400 flex items-center gap-1.5">
-                      <CheckCircle className="h-4 w-4" /> Saved
-                    </span>
-                  )}
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card className="bg-card border-card-border">
-              <CardHeader className="pb-4">
-                <div className="flex items-center gap-3">
-                  <div className="bg-primary/20 p-2 rounded-lg"><Settings className="h-5 w-5 text-primary" /></div>
-                  <div>
-                    <CardTitle className="text-xl">Twilio WhatsApp Credentials</CardTitle>
-                    <p className="text-sm text-muted-foreground mt-1">These credentials are used to send PIN messages to street captains and automatic notifications via WhatsApp.</p>
-                  </div>
-                </div>
-              </CardHeader>
-              <CardContent className="space-y-5">
-                <div className="space-y-2">
-                  <Label htmlFor="twilio-sid">Account SID</Label>
-                  <Input
-                    id="twilio-sid"
-                    value={settingsSid ?? siteSettings?.twilioAccountSid ?? ""}
-                    onChange={e => setSettingsSid(e.target.value)}
-                    placeholder="ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
-                    className="bg-background border-border font-mono text-sm"
-                  />
-                  <p className="text-xs text-muted-foreground">Found in your Twilio console — starts with AC.</p>
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="twilio-token">Auth Token</Label>
-                  <Input
-                    id="twilio-token"
-                    type="password"
-                    value={settingsToken ?? siteSettings?.twilioAuthToken ?? ""}
-                    onChange={e => setSettingsToken(e.target.value)}
-                    placeholder="••••••••••••••••••••••••••••••••"
-                    className="bg-background border-border font-mono text-sm"
-                  />
-                  <p className="text-xs text-muted-foreground">From your Twilio console — keep this secret.</p>
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="twilio-from">WhatsApp From Number</Label>
-                  <Input
-                    id="twilio-from"
-                    value={settingsFrom ?? siteSettings?.twilioWhatsappFrom ?? ""}
-                    onChange={e => setSettingsFrom(e.target.value)}
-                    placeholder="+14155238886"
-                    className="bg-background border-border font-mono text-sm"
-                  />
-                  <p className="text-xs text-muted-foreground">Your Twilio WhatsApp sender number (sandbox default: +14155238886).</p>
-                </div>
-
-                <div className="flex items-center gap-3 pt-1">
-                  <Button
-                    onClick={() => saveSettings.mutate({
-                      twilioAccountSid: settingsSid ?? siteSettings?.twilioAccountSid ?? "",
-                      twilioAuthToken: settingsToken ?? siteSettings?.twilioAuthToken ?? "",
-                      twilioWhatsappFrom: settingsFrom ?? siteSettings?.twilioWhatsappFrom ?? "",
-                      notifyWhatsapp: settingsNotify ?? siteSettings?.notifyWhatsapp ?? "",
-                    })}
-                    disabled={saveSettings.isPending}
-                    className="bg-primary text-primary-foreground hover:bg-primary/90 gap-2"
-                  >
-                    <Save className="h-4 w-4" />
-                    {saveSettings.isPending ? "Saving…" : "Save credentials"}
-                  </Button>
-                  {settingsSaved && (
-                    <span className="text-sm text-green-400 flex items-center gap-1.5">
-                      <CheckCircle className="h-4 w-4" /> Saved
-                    </span>
-                  )}
-                </div>
-
-                {siteSettings?.twilioAccountSid ? (
-                  <div className="bg-green-500/10 border border-green-500/20 rounded-lg p-3">
-                    <p className="text-sm text-green-400 flex items-center gap-2">
-                      <CheckCircle className="h-4 w-4 shrink-0" />
-                      Twilio configured — PIN messages will be sent via WhatsApp.
-                    </p>
-                  </div>
-                ) : (
-                  <div className="bg-amber-500/10 border border-amber-500/20 rounded-lg p-3">
-                    <p className="text-sm text-amber-400 flex items-center gap-2">
-                      <AlertTriangle className="h-4 w-4 shrink-0" />
-                      No credentials saved — captain PINs will be set but WhatsApp messages won't send.
-                    </p>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          </div>
-        )}
 
       </main>
     </div>

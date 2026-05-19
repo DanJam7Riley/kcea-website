@@ -2,7 +2,6 @@ import { Router } from "express";
 import { createHmac, randomBytes } from "crypto";
 import { db, captainProfilesTable, captainTokensTable, streetCaptainsTable, commitmentsTable, propertyNotesTable, streetHousesTable } from "@workspace/db";
 import { eq, and, inArray, gt, desc } from "drizzle-orm";
-import { sendWhatsApp, pinMessage } from "../lib/whatsapp";
 
 const router = Router();
 const ADMIN_PASSWORD = () => process.env.ADMIN_PASSWORD ?? "kcea2026";
@@ -324,11 +323,7 @@ router.post("/captain/management/:id/set-pin", async (req, res) => {
 
     if (!updated) { res.status(404).json({ error: "Not found" }); return; }
 
-    if (updated.phone) {
-      void sendWhatsApp(pinMessage(updated.name, pin), updated.phone).catch(() => {});
-    }
-
-    res.json({ ...updated, whatsappSent: !!updated.phone });
+    res.json(updated);
   } catch (err) {
     req.log.error(err);
     res.status(500).json({ error: "Failed to set PIN" });
