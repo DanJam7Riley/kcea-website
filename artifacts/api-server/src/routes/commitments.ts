@@ -67,14 +67,22 @@ router.get("/commitments/lookup", async (req, res) => {
       return badPhone || badEmail || badName;
     };
 
-    const confirmed = rows.some(r => r.paymentConfirmed);
-    const incomplete = rows.some(isIncomplete);
+    const records = rows.map(r => ({
+      name: r.fullName,
+      street: r.street,
+      houseNumber: r.houseNumber,
+      paymentConfirmed: r.paymentConfirmed,
+      incomplete: isIncomplete(r),
+    }));
+    const confirmed = records.some(r => r.paymentConfirmed);
+    const incomplete = records.some(r => r.incomplete);
     res.json({
       found: true,
       paymentConfirmed: confirmed,
       incomplete,
       count: rows.length,
       names: rows.map(r => `${r.fullName} — ${r.street} No. ${r.houseNumber}`),
+      records,
     });
   } catch (err) {
     req.log.error(err);

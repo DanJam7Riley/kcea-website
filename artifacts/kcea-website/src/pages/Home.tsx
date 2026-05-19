@@ -92,7 +92,9 @@ export default function Home() {
     found: boolean;
     paymentConfirmed?: boolean;
     incomplete?: boolean;
+    count?: number;
     names?: string[];
+    records?: { name: string; street: string; houseNumber: string; paymentConfirmed: boolean; incomplete: boolean }[];
   } | null>(null);
 
   const { toast } = useToast();
@@ -105,7 +107,7 @@ export default function Home() {
     setLookupResult(null);
     try {
       const res = await fetch(`${BASE}/api/commitments/lookup?q=${encodeURIComponent(q)}`);
-      const data = await res.json() as { found: boolean; paymentConfirmed?: boolean; incomplete?: boolean; names?: string[] };
+      const data = await res.json() as { found: boolean; paymentConfirmed?: boolean; incomplete?: boolean; count?: number; names?: string[]; records?: { name: string; street: string; houseNumber: string; paymentConfirmed: boolean; incomplete: boolean }[] };
       setLookupResult(data);
     } catch {
       toast({ title: "Lookup failed", description: "Please try again.", variant: "destructive" });
@@ -129,13 +131,15 @@ export default function Home() {
   const handleFormSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      await fetch(`${BASE}/api/commitments`, {
+      const res = await fetch(`${BASE}/api/commitments`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(formData),
       });
+      if (!res.ok) throw new Error("Server error");
     } catch {
-      // silently ignore network errors — form still shows success
+      toast({ title: "Submission failed", description: "Please try again or contact your street captain.", variant: "destructive" });
+      return;
     }
     setFormSubmitted(true);
     toast({
@@ -374,7 +378,7 @@ export default function Home() {
 
           <div className="grid lg:grid-cols-5 gap-8">
             <Card className="bg-card border-card-border lg:col-span-3">
-              <CardContent className="p-8">
+              <CardContent className="p-4 sm:p-8">
                 {!formSubmitted ? (
                   <form onSubmit={handleFormSubmit} className="space-y-6" data-testid="form-commitment">
                     <div className="grid md:grid-cols-2 gap-6">
@@ -488,39 +492,65 @@ export default function Home() {
                 </form>
 
                 {lookupResult && (
-                  <div className={`rounded-lg px-4 py-3 flex items-start gap-3 text-sm border ${
-                    !lookupResult.found
-                      ? "bg-red-500/10 border-red-500/30 text-red-300"
-                      : lookupResult.incomplete
-                        ? "bg-amber-500/10 border-amber-500/30 text-amber-300"
-                        : lookupResult.paymentConfirmed
-                          ? "bg-green-500/10 border-green-500/30 text-green-300"
-                          : "bg-amber-500/10 border-amber-500/30 text-amber-300"
-                  }`}>
-                    <span className="text-base leading-none mt-0.5">
-                      {!lookupResult.found ? "✗" : lookupResult.incomplete ? "⚠" : lookupResult.paymentConfirmed ? "✓" : "⚠"}
-                    </span>
-                    <div className="space-y-1">
-                      <p className="font-medium">
-                        {!lookupResult.found
-                          ? "We don't have a record for you."
-                          : lookupResult.incomplete
-                            ? "We have a partial record for your address, but some details are missing."
-                            : lookupResult.paymentConfirmed
-                              ? "You're on the list — thank you for your commitment!"
-                              : "We have your name but no payment recorded yet."}
+                  lookupResult.found && lookupResult.count && lookupResult.count > 1 ? (
+                    <div className="rounded-lg border border-border bg-card/40 p-4 space-y-3 text-sm">
+                      <p className="font-medium text-foreground">
+                        We found {lookupResult.count} records matching your search — please identify which is yours:
                       </p>
-                      <p className="text-xs opacity-80">
-                        {!lookupResult.found
-                          ? "Please submit the commitment form above or contact your street captain."
-                          : lookupResult.incomplete
-                            ? "Please contact your street captain or email jomartins111@gmail.com to complete your registration."
-                            : lookupResult.paymentConfirmed
-                              ? `Found: ${lookupResult.names?.join("; ")}`
-                              : "Your street captain will be in touch to confirm payment."}
-                      </p>
+                      <div className="space-y-2">
+                        {lookupResult.records?.map((r, i) => (
+                          <div key={i} className={`flex items-center justify-between gap-2 rounded-md px-3 py-2 border ${
+                            r.paymentConfirmed
+                              ? "bg-green-500/10 border-green-500/30"
+                              : "bg-amber-500/10 border-amber-500/30"
+                          }`}>
+                            <span>
+                              <span className="font-medium">{r.name}</span>
+                              <span className="text-muted-foreground"> — {r.street}, No. {r.houseNumber}</span>
+                            </span>
+                            <span className={`text-xs font-medium shrink-0 ${r.paymentConfirmed ? "text-green-400" : "text-amber-400"}`}>
+                              {r.paymentConfirmed ? "✓ Confirmed" : r.incomplete ? "⚠ Incomplete" : "⚠ Pending"}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                      <p className="text-xs text-muted-foreground">If your record shows as pending, your street captain will be in touch about payment details.</p>
                     </div>
-                  </div>
+                  ) : (
+                    <div className={`rounded-lg px-4 py-3 flex items-start gap-3 text-sm border ${
+                      !lookupResult.found
+                        ? "bg-red-500/10 border-red-500/30 text-red-300"
+                        : lookupResult.incomplete
+                          ? "bg-amber-500/10 border-amber-500/30 text-amber-300"
+                          : lookupResult.paymentConfirmed
+                            ? "bg-green-500/10 border-green-500/30 text-green-300"
+                            : "bg-amber-500/10 border-amber-500/30 text-amber-300"
+                    }`}>
+                      <span className="text-base leading-none mt-0.5">
+                        {!lookupResult.found ? "✗" : lookupResult.incomplete ? "⚠" : lookupResult.paymentConfirmed ? "✓" : "⚠"}
+                      </span>
+                      <div className="space-y-1">
+                        <p className="font-medium">
+                          {!lookupResult.found
+                            ? "We don't have a record for you."
+                            : lookupResult.incomplete
+                              ? "We have a partial record for your address, but some details are missing."
+                              : lookupResult.paymentConfirmed
+                                ? "You're on the list — thank you for your commitment!"
+                                : "We have your name but no payment recorded yet."}
+                        </p>
+                        <p className="text-xs opacity-80">
+                          {!lookupResult.found
+                            ? "Please submit the commitment form above or contact your street captain."
+                            : lookupResult.incomplete
+                              ? "Please contact your street captain or email jomartins111@gmail.com to complete your registration."
+                              : lookupResult.paymentConfirmed
+                                ? `Found: ${lookupResult.names?.join("; ")}`
+                                : "Your street captain will be in touch to confirm payment."}
+                        </p>
+                      </div>
+                    </div>
+                  )
                 )}
               </CardContent>
             </Card>

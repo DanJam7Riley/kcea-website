@@ -1,24 +1,29 @@
 import { Router } from "express";
-import { db, siteStatsTable } from "@workspace/db";
+import { db, siteStatsTable, commitmentsTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 
 const router = Router();
 
-const DEFAULT_STATS = {
-  committedHouseholds: 191,
-  monthlyContributions: 47750,
-  targetHouseholds: 680,
-  fundingPercent: 28,
-};
+const DEFAULT_TARGET = 680;
 
-async function getOrCreateStats() {
+async function getOrCreateSettings() {
   const rows = await db.select().from(siteStatsTable).limit(1);
   if (rows.length > 0) return rows[0];
   const [created] = await db
     .insert(siteStatsTable)
-    .values(DEFAULT_STATS)
+    .values({ committedHouseholds: 0, monthlyContributions: 0, targetHouseholds: DEFAULT_TARGET, fundingPercent: 0 })
     .returning();
   return created;
+}
+
+async function calcStats(targetHouseholds: number) {
+  const all = await db.select({ commitmentType: commitmentsTable.commitmentType }).from(commitmentsTable);
+  const committedHouseholds = all.length;
+  const monthlyContributions = all.filter(c => c.commitmentType === "monthly").length * 250;
+  const fundingPercent = targetHouseholds > 0
+    ? Math.min(100, Math.round((committedHouseholds / targetHouseholds) * 100))
+    : 0;
+  return { committedHouseholds, monthlyContributions, targetHouseholds, fundingPercent };
 }
 
 router.post("/admin/verify", (req, res) => {
@@ -33,8 +38,8 @@ router.post("/admin/verify", (req, res) => {
 
 router.get("/stats", async (req, res) => {
   try {
-    const stats = await getOrCreateStats();
-    res.json(stats);
+    const settings = await getOrCreateSettings();
+    res.json(await calcStats(settings.targetHouseholds ?? DEFAULT_TARGET));
   } catch (err) {
     req.log.error(err);
     res.status(500).json({ error: "Failed to fetch stats" });
@@ -50,12 +55,8 @@ router.put("/stats", async (req, res) => {
   }
 
   const body = req.body as Record<string, unknown>;
-  const patch: Partial<typeof DEFAULT_STATS> = {};
-
-  if (typeof body.committedHouseholds === "number") patch.committedHouseholds = Math.max(0, Math.floor(body.committedHouseholds));
-  if (typeof body.monthlyContributions === "number") patch.monthlyContributions = Math.max(0, Math.floor(body.monthlyContributions));
+  const patch: Partial<{ targetHouseholds: number }> = {};
   if (typeof body.targetHouseholds === "number") patch.targetHouseholds = Math.max(1, Math.floor(body.targetHouseholds));
-  if (typeof body.fundingPercent === "number") patch.fundingPercent = Math.min(100, Math.max(0, Math.floor(body.fundingPercent)));
 
   if (Object.keys(patch).length === 0) {
     res.status(400).json({ error: "No valid fields provided" });
@@ -63,13 +64,10 @@ router.put("/stats", async (req, res) => {
   }
 
   try {
-    const stats = await getOrCreateStats();
-    const [updated] = await db
-      .update(siteStatsTable)
-      .set({ ...patch, updatedAt: new Date() })
-      .where(eq(siteStatsTable.id, stats.id))
-      .returning();
-    res.json(updated);
+    const settings = await getOrCreateSettings();
+    await db.update(siteStatsTable).set({ ...patch, updatedAt: new Date() }).where(eq(siteStatsTable.id, settings.id));
+    const newTarget = patch.targetHouseholds ?? settings.targetHouseholds ?? DEFAULT_TARGET;
+    res.json(await calcStats(newTarget));
   } catch (err) {
     req.log.error(err);
     res.status(500).json({ error: "Failed to update stats" });

@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Shield, Save, LogIn, AlertTriangle, CheckCircle, Check, Key,
@@ -47,12 +47,10 @@ function makeResidentWaUrl(phone: string, message: string): string | null {
 }
 
 interface SiteStats {
-  id: number;
   committedHouseholds: number;
   monthlyContributions: number;
   targetHouseholds: number;
   fundingPercent: number;
-  updatedAt: string;
 }
 
 interface StreetCaptain {
@@ -432,6 +430,15 @@ export default function Admin() {
   const monthlyCount = commitments.filter(c => c.commitmentType === "monthly").length;
   const onceOffCount = commitments.filter(c => c.commitmentType === "onceoff").length;
 
+  const duplicateKeys = useMemo(() => {
+    const counts = new Map<string, number>();
+    commitments.forEach(c => {
+      const key = `${c.fullName.toLowerCase()}|${c.street.toLowerCase()}|${c.houseNumber.toLowerCase()}`;
+      counts.set(key, (counts.get(key) ?? 0) + 1);
+    });
+    return new Set([...counts.entries()].filter(([, n]) => n > 1).map(([k]) => k));
+  }, [commitments]);
+
   if (!authed) {
     return (
       <div className="min-h-screen bg-background text-foreground dark flex items-center justify-center p-4">
@@ -662,6 +669,9 @@ export default function Admin() {
                         {c.paymentConfirmed && (
                           <Badge className="bg-green-500/20 text-green-400 border-green-500/20 text-xs w-fit" variant="outline">Paid ✓</Badge>
                         )}
+                        {duplicateKeys.has(`${c.fullName.toLowerCase()}|${c.street.toLowerCase()}|${c.houseNumber.toLowerCase()}`) && (
+                          <Badge className="bg-red-500/20 text-red-400 border-red-500/20 text-xs w-fit" variant="outline">Duplicate</Badge>
+                        )}
                       </div>
                       <div className="col-span-1">
                         <p className="text-xs text-muted-foreground whitespace-nowrap">
@@ -717,62 +727,36 @@ export default function Admin() {
                 <p className="text-muted-foreground text-sm">Loading…</p>
               ) : (
                 <>
-                  <div className="grid sm:grid-cols-2 gap-6">
-                    <div className="space-y-2">
-                      <Label htmlFor="committedHouseholds">Committed Households</Label>
-                      <Input
-                        id="committedHouseholds"
-                        type="number"
-                        min={0}
-                        defaultValue={stats?.committedHouseholds}
-                        key={`ch-${stats?.committedHouseholds}`}
-                        onChange={e => handleStatsChange("committedHouseholds", e.target.value)}
-                        className="bg-background border-border"
-                      />
+                  <div className="grid sm:grid-cols-3 gap-4">
+                    <div className="bg-background/50 border border-border rounded-lg p-4 space-y-1">
+                      <p className="text-xs text-muted-foreground uppercase tracking-wide">Committed Households</p>
+                      <p className="text-2xl font-bold">{stats?.committedHouseholds ?? "—"}</p>
+                      <p className="text-xs text-muted-foreground">Live from database</p>
                     </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="targetHouseholds">Target Households</Label>
-                      <Input
-                        id="targetHouseholds"
-                        type="number"
-                        min={1}
-                        defaultValue={stats?.targetHouseholds}
-                        key={`th-${stats?.targetHouseholds}`}
-                        onChange={e => handleStatsChange("targetHouseholds", e.target.value)}
-                        className="bg-background border-border"
-                      />
+                    <div className="bg-background/50 border border-border rounded-lg p-4 space-y-1">
+                      <p className="text-xs text-muted-foreground uppercase tracking-wide">Monthly Income</p>
+                      <p className="text-2xl font-bold">R{stats?.monthlyContributions?.toLocaleString() ?? "—"}</p>
+                      <p className="text-xs text-muted-foreground">Monthly commitments × R250</p>
                     </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="monthlyContributions">Monthly Contributions (R)</Label>
-                      <Input
-                        id="monthlyContributions"
-                        type="number"
-                        min={0}
-                        defaultValue={stats?.monthlyContributions}
-                        key={`mc-${stats?.monthlyContributions}`}
-                        onChange={e => handleStatsChange("monthlyContributions", e.target.value)}
-                        className="bg-background border-border"
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="fundingPercent">Phase 1 Funding % (0–100)</Label>
-                      <Input
-                        id="fundingPercent"
-                        type="number"
-                        min={0}
-                        max={100}
-                        defaultValue={stats?.fundingPercent}
-                        key={`fp-${stats?.fundingPercent}`}
-                        onChange={e => handleStatsChange("fundingPercent", e.target.value)}
-                        className="bg-background border-border"
-                      />
+                    <div className="bg-background/50 border border-border rounded-lg p-4 space-y-1">
+                      <p className="text-xs text-muted-foreground uppercase tracking-wide">Phase 1 Funding</p>
+                      <p className="text-2xl font-bold">{stats?.fundingPercent ?? "—"}%</p>
+                      <p className="text-xs text-muted-foreground">Of {stats?.targetHouseholds ?? "—"} household target</p>
                     </div>
                   </div>
-                  {stats?.updatedAt && (
-                    <p className="text-xs text-muted-foreground">
-                      Last updated: {new Date(stats.updatedAt).toLocaleString()}
-                    </p>
-                  )}
+                  <div className="max-w-xs space-y-2">
+                    <Label htmlFor="targetHouseholds">Target Households</Label>
+                    <Input
+                      id="targetHouseholds"
+                      type="number"
+                      min={1}
+                      defaultValue={stats?.targetHouseholds}
+                      key={`th-${stats?.targetHouseholds}`}
+                      onChange={e => handleStatsChange("targetHouseholds", e.target.value)}
+                      className="bg-background border-border"
+                    />
+                    <p className="text-xs text-muted-foreground">The number of households needed to fully fund the project. This updates the funding % shown on the homepage.</p>
+                  </div>
                   <div className="flex items-center gap-3 pt-2">
                     <Button
                       onClick={() => updateStats.mutate(statsForm)}
@@ -780,7 +764,7 @@ export default function Admin() {
                       className="bg-primary text-primary-foreground hover:bg-primary/90"
                     >
                       <Save className="mr-2 h-4 w-4" />
-                      {updateStats.isPending ? "Saving…" : "Save Stats"}
+                      {updateStats.isPending ? "Saving…" : "Save Target"}
                     </Button>
                     {statsSaved && (
                       <div className="flex items-center gap-1.5 text-green-400 text-sm">
