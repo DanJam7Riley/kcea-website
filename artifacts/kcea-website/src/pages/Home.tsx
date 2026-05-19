@@ -60,7 +60,7 @@ const faqs = [
   { q: "How much does it cost per household?", a: "R250 per month on an ongoing basis, or R3,000 as a once-off upfront payment (equivalent to 12 months). Households can also choose both options. Speak to your street captain if cost is a concern." },
   { q: "How many households have committed so far?", a: "178 households as of the latest update, generating approximately R44,500 per month. Our target is 680+ households." },
   { q: "What is the timeline for the enclosure to be built?", a: "Phase 1 (now–5 months): Raise R200,000 for the consultant, Traffic Impact Study, and application. Phase 2 (5–8 months): City approval and raise remaining R1.8 million. Phase 3 (8–11 months): Install gates, cameras, and armed response — go live." },
-  { q: "How does the application process work?", a: "We apply under the CoJ Security Access Restriction Policy 2018 via the JRA. Requirements: 60% property owner consent, a Traffic Impact Study, and full financial backing. Our consultant Stephen Margo (Margo Security) leads the submission." },
+  { q: "How does the application process work?", a: "We apply under the CoJ Security Access Restriction Policy 2018 via the JRA. Requirements: 60% property owner consent, a Traffic Impact Study, and full financial backing." },
   { q: "Will the enclosure close all streets?", a: "No — boom gates will be installed at key entry and exit points only. Emergency vehicles, Pikitup, and public transport maintain access at all times. Pedestrian access is legally required at every point and will be provided." },
   { q: "Can I pay monthly or as a lump sum?", a: "Both. R250/month ongoing or R3,000 once-off. Paying upfront helps us reach Phase 1 faster. Submit the form and your street captain will be in touch with payment details." },
   { q: "What if I don't want to commit financially?", a: "The project depends on community funding. If you're not ready, you can still help by sharing this site, supporting your street captain, or volunteering as a captain yourself." },
@@ -696,10 +696,6 @@ export default function Home() {
               <div className="flex items-center gap-3 text-muted-foreground">
                 <Mail className="h-5 w-5 text-primary" />
                 <a href="mailto:kcea.kensington@gmail.com" className="hover:text-primary transition-colors">kcea.kensington@gmail.com</a>
-              </div>
-              <div className="flex items-center gap-3 text-muted-foreground">
-                <Phone className="h-5 w-5 text-primary" />
-                <span>Stephen Margo (Consultant): 076 030 2342</span>
               </div>
               <div className="flex items-center gap-3 text-muted-foreground">
                 <MapPin className="h-5 w-5 text-primary" />
