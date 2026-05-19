@@ -1024,7 +1024,7 @@ export default function Admin() {
                     </div>
                     <div className="w-40 space-y-1">
                       <Label className="text-xs">Phone</Label>
-                      <Input value={newProfilePhone} onChange={e => setNewProfilePhone(e.target.value)} placeholder="+27821234567" className="bg-background border-border h-8 text-sm" />
+                      <Input value={newProfilePhone} onChange={e => setNewProfilePhone(e.target.value)} placeholder="e.g. 082 123 4567" className="bg-background border-border h-8 text-sm" />
                     </div>
                     <Button size="sm" className="h-8" disabled={!newProfileName.trim() || createCaptainProfile.isPending} onClick={() => createCaptainProfile.mutate({ name: newProfileName.trim(), phone: newProfilePhone.trim() })}>
                       {createCaptainProfile.isPending ? "Adding…" : "Add"}
@@ -1078,7 +1078,7 @@ export default function Admin() {
                                 <Input
                                   value={phoneEdits[p.id] ?? p.phone ?? ""}
                                   onChange={e => setPhoneEdits(prev => ({ ...prev, [p.id]: e.target.value }))}
-                                  placeholder="+27821234567"
+                                  placeholder="e.g. 082 123 4567"
                                   className="bg-background border-border h-8 text-xs"
                                 />
                                 {isSaved ? (
