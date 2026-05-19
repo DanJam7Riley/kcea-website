@@ -3,7 +3,7 @@ import { motion } from "framer-motion";
 import { useQuery } from "@tanstack/react-query";
 import { 
   ChevronDown, Check, AlertCircle, Mail, MapPin, Phone, 
-  TrendingUp, Shield, Users, Menu, X 
+  TrendingUp, Shield, Users, Menu, X, Search, Loader2
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -79,7 +79,32 @@ export default function Home() {
   const [volunteerForm, setVolunteerForm] = useState({
     fullName: "", street: "", phone: "", email: "", motivation: "",
   });
+  const [lookupQuery, setLookupQuery] = useState("");
+  const [lookupLoading, setLookupLoading] = useState(false);
+  const [lookupResult, setLookupResult] = useState<{
+    found: boolean;
+    paymentConfirmed?: boolean;
+    names?: string[];
+  } | null>(null);
+
   const { toast } = useToast();
+
+  const handleLookup = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const q = lookupQuery.trim();
+    if (q.length < 2) return;
+    setLookupLoading(true);
+    setLookupResult(null);
+    try {
+      const res = await fetch(`${BASE}/api/commitments/lookup?q=${encodeURIComponent(q)}`);
+      const data = await res.json() as { found: boolean; paymentConfirmed?: boolean; names?: string[] };
+      setLookupResult(data);
+    } catch {
+      toast({ title: "Lookup failed", description: "Please try again.", variant: "destructive" });
+    } finally {
+      setLookupLoading(false);
+    }
+  };
 
   const { data: stats = DEFAULT_STATS } = useQuery<SiteStats>({
     queryKey: ["stats"],
@@ -426,6 +451,63 @@ export default function Home() {
                 </CardContent>
               </Card>
             </div>
+          </div>
+
+          {/* Commitment Lookup */}
+          <div className="max-w-2xl mx-auto">
+            <Card className="bg-card/60 border-border/50 backdrop-blur-sm">
+              <CardContent className="p-6 space-y-4">
+                <div className="text-center space-y-1">
+                  <h3 className="text-lg font-semibold text-foreground">Already Committed? Check Your Status</h3>
+                  <p className="text-sm text-muted-foreground">Enter your name or street address to verify your commitment.</p>
+                </div>
+
+                <form onSubmit={handleLookup} className="flex gap-2">
+                  <Input
+                    value={lookupQuery}
+                    onChange={e => { setLookupQuery(e.target.value); setLookupResult(null); }}
+                    placeholder="e.g. Smith or Derby Road 12"
+                    className="bg-background border-border flex-1"
+                    minLength={2}
+                    required
+                  />
+                  <Button type="submit" disabled={lookupLoading || lookupQuery.trim().length < 2} className="gap-2 shrink-0">
+                    {lookupLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
+                    Check
+                  </Button>
+                </form>
+
+                {lookupResult && (
+                  <div className={`rounded-lg px-4 py-3 flex items-start gap-3 text-sm border ${
+                    !lookupResult.found
+                      ? "bg-red-500/10 border-red-500/30 text-red-300"
+                      : lookupResult.paymentConfirmed
+                        ? "bg-green-500/10 border-green-500/30 text-green-300"
+                        : "bg-amber-500/10 border-amber-500/30 text-amber-300"
+                  }`}>
+                    <span className="text-base leading-none mt-0.5">
+                      {!lookupResult.found ? "✗" : lookupResult.paymentConfirmed ? "✓" : "⚠"}
+                    </span>
+                    <div className="space-y-1">
+                      <p className="font-medium">
+                        {!lookupResult.found
+                          ? "We don't have a record for you."
+                          : lookupResult.paymentConfirmed
+                            ? "You're on the list — thank you for your commitment!"
+                            : "We have your name but no payment recorded yet."}
+                      </p>
+                      <p className="text-xs opacity-80">
+                        {!lookupResult.found
+                          ? "Please submit the commitment form above or contact your street captain."
+                          : lookupResult.paymentConfirmed
+                            ? `Found: ${lookupResult.names?.join("; ")}`
+                            : "Your street captain will be in touch to confirm payment."}
+                      </p>
+                    </div>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
           </div>
         </section>
 

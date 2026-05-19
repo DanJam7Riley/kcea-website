@@ -1,7 +1,7 @@
 import { useState, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
-  Shield, Save, LogIn, AlertTriangle, CheckCircle,
+  Shield, Save, LogIn, AlertTriangle, CheckCircle, Check,
   Trash2, Download, Upload, Users, ClipboardList, BarChart3, Search, MessageSquare
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -42,6 +42,7 @@ interface Commitment {
   houseNumber: string;
   commitmentType: string;
   imported: boolean;
+  paymentConfirmed: boolean;
   submittedAt: string;
 }
 
@@ -170,6 +171,16 @@ export default function Admin() {
       fetch(`${BASE}/api/volunteers/${id}`, { method: "DELETE", headers: authHeaders })
         .then(async r => { if (!r.ok) throw new Error(await r.text()); return r.json(); }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["volunteers"] }),
+  });
+
+  const confirmPayment = useMutation({
+    mutationFn: ({ id, paymentConfirmed }: { id: number; paymentConfirmed: boolean }) =>
+      fetch(`${BASE}/api/commitments/${id}/confirm`, {
+        method: "PUT",
+        headers: { ...authHeaders, "Content-Type": "application/json" },
+        body: JSON.stringify({ paymentConfirmed }),
+      }).then(async r => { if (!r.ok) throw new Error(await r.text()); return r.json(); }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["commitments"] }),
   });
 
   const handleTestNotify = async () => {
@@ -559,13 +570,23 @@ export default function Admin() {
                         {c.imported && (
                           <Badge className="bg-amber-500/20 text-amber-400 border-amber-500/20 text-xs w-fit" variant="outline">Imported</Badge>
                         )}
+                        {c.paymentConfirmed && (
+                          <Badge className="bg-green-500/20 text-green-400 border-green-500/20 text-xs w-fit" variant="outline">Paid ✓</Badge>
+                        )}
                       </div>
                       <div className="col-span-1">
                         <p className="text-xs text-muted-foreground whitespace-nowrap">
                           {new Date(c.submittedAt).toLocaleDateString("en-ZA", { day: "2-digit", month: "short" })}
                         </p>
                       </div>
-                      <div className="col-span-1 flex justify-end">
+                      <div className="col-span-1 flex justify-end gap-1">
+                        <button
+                          onClick={() => confirmPayment.mutate({ id: c.id, paymentConfirmed: !c.paymentConfirmed })}
+                          className={`transition-colors p-1 rounded ${c.paymentConfirmed ? "text-green-400 hover:text-muted-foreground" : "text-muted-foreground hover:text-green-400"}`}
+                          title={c.paymentConfirmed ? "Mark payment unconfirmed" : "Mark payment confirmed"}
+                        >
+                          <Check className="h-4 w-4" />
+                        </button>
                         <button
                           onClick={() => {
                             if (confirm(`Delete submission from ${c.fullName}?`)) deleteCommitment.mutate(c.id);

@@ -29,6 +29,7 @@ export const commitmentsTable = pgTable("commitments", {
   commitmentType: text("commitment_type").notNull(),
   notes: text("notes"),
   imported: boolean("imported").notNull().default(false),
+  paymentConfirmed: boolean("payment_confirmed").notNull().default(false),
   submittedAt: timestamp("submitted_at").notNull().defaultNow(),
 });
 

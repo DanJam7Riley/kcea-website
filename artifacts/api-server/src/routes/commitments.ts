@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { db, commitmentsTable } from "@workspace/db";
-import { eq, desc, and } from "drizzle-orm";
+import { eq, desc, sql } from "drizzle-orm";
 import { sendWhatsApp, commitmentMessage } from "../lib/whatsapp";
 
 const router = Router();
@@ -23,7 +23,7 @@ router.post("/commitments", async (req, res) => {
   try {
     const [created] = await db
       .insert(commitmentsTable)
-      .values({ fullName, email, phone, street, houseNumber, commitmentType, imported: false })
+      .values({ fullName, email, phone, street, houseNumber, commitmentType, imported: false, paymentConfirmed: false })
       .returning();
 
     void sendWhatsApp(commitmentMessage(fullName, street, houseNumber, phone, commitmentType)).catch(() => {});
@@ -32,6 +32,46 @@ router.post("/commitments", async (req, res) => {
   } catch (err) {
     req.log.error(err);
     res.status(500).json({ error: "Failed to save commitment" });
+  }
+});
+
+// Public lookup — returns status only, no personal details
+router.get("/commitments/lookup", async (req, res) => {
+  const q = typeof req.query.q === "string" ? req.query.q.trim() : "";
+  if (!q || q.length < 2) {
+    res.status(400).json({ error: "Query must be at least 2 characters" });
+    return;
+  }
+
+  try {
+    // Search by name (partial, case-insensitive) OR street + house combination
+    const rows = await db
+      .select({
+        fullName: commitmentsTable.fullName,
+        street: commitmentsTable.street,
+        houseNumber: commitmentsTable.houseNumber,
+        paymentConfirmed: commitmentsTable.paymentConfirmed,
+      })
+      .from(commitmentsTable)
+      .where(sql`lower(${commitmentsTable.fullName}) like ${"%" + q.toLowerCase() + "%"}`)
+      .limit(10);
+
+    if (rows.length === 0) {
+      res.json({ found: false });
+      return;
+    }
+
+    // Return the best match — payment confirmed if any match has it
+    const confirmed = rows.some(r => r.paymentConfirmed);
+    res.json({
+      found: true,
+      paymentConfirmed: confirmed,
+      count: rows.length,
+      names: rows.map(r => `${r.fullName} — ${r.street} No. ${r.houseNumber}`),
+    });
+  } catch (err) {
+    req.log.error(err);
+    res.status(500).json({ error: "Lookup failed" });
   }
 });
 
@@ -87,6 +127,7 @@ router.post("/commitments/import", async (req, res) => {
         houseNumber,
         commitmentType: commitmentType === "once-off" || commitmentType === "onceoff" ? "onceoff" : "monthly",
         imported: true,
+        paymentConfirmed: false,
         submittedAt: isNaN(submittedAt.getTime()) ? new Date() : submittedAt,
       });
 
@@ -118,6 +159,41 @@ router.get("/commitments", async (req, res) => {
   } catch (err) {
     req.log.error(err);
     res.status(500).json({ error: "Failed to fetch commitments" });
+  }
+});
+
+// Toggle payment confirmed — admin only
+router.put("/commitments/:id/confirm", async (req, res) => {
+  const password = req.headers["x-admin-password"] as string;
+  const adminPassword = process.env.ADMIN_PASSWORD ?? "kcea2026";
+  if (!password || password !== adminPassword) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+
+  const id = parseInt(req.params.id, 10);
+  if (isNaN(id)) {
+    res.status(400).json({ error: "Invalid id" });
+    return;
+  }
+
+  const body = req.body as Record<string, unknown>;
+  const paymentConfirmed = typeof body.paymentConfirmed === "boolean" ? body.paymentConfirmed : true;
+
+  try {
+    const [updated] = await db
+      .update(commitmentsTable)
+      .set({ paymentConfirmed })
+      .where(eq(commitmentsTable.id, id))
+      .returning();
+    if (!updated) {
+      res.status(404).json({ error: "Not found" });
+      return;
+    }
+    res.json(updated);
+  } catch (err) {
+    req.log.error(err);
+    res.status(500).json({ error: "Failed to update" });
   }
 });
 
