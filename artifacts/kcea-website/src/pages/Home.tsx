@@ -198,6 +198,7 @@ export default function Home() {
             <button onClick={() => scrollTo('progress')} data-testid="link-nav-progress" className="hover:text-primary transition-colors">Progress</button>
             <button onClick={() => scrollTo('captains')} data-testid="link-nav-captains" className="hover:text-primary transition-colors">Captains</button>
             <button onClick={() => scrollTo('faq')} data-testid="link-nav-faq" className="hover:text-primary transition-colors">FAQ</button>
+            <a href="/captain" className="text-sm hover:text-primary transition-colors text-muted-foreground">Captain Login</a>
             <Button onClick={() => scrollTo('commit')} data-testid="button-nav-commit" size="sm" className="bg-primary text-primary-foreground hover:bg-primary/90">Commit Now</Button>
           </nav>
 
@@ -212,6 +213,7 @@ export default function Home() {
             <button onClick={() => scrollTo('progress')} data-testid="link-mobile-progress" className="block w-full text-left py-2 text-muted-foreground hover:text-primary">Progress</button>
             <button onClick={() => scrollTo('captains')} data-testid="link-mobile-captains" className="block w-full text-left py-2 text-muted-foreground hover:text-primary">Captains</button>
             <button onClick={() => scrollTo('faq')} data-testid="link-mobile-faq" className="block w-full text-left py-2 text-muted-foreground hover:text-primary">FAQ</button>
+            <a href="/captain" className="block w-full text-left py-2 text-muted-foreground hover:text-primary text-sm">Captain Login</a>
             <Button onClick={() => scrollTo('commit')} data-testid="button-mobile-commit" className="w-full bg-primary text-primary-foreground">Commit Now</Button>
           </div>
         )}

@@ -1,7 +1,7 @@
 import { useState, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
-  Shield, Save, LogIn, AlertTriangle, CheckCircle, Check,
+  Shield, Save, LogIn, AlertTriangle, CheckCircle, Check, Key,
   Trash2, Download, Upload, Users, ClipboardList, BarChart3, Search, MessageSquare
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -13,7 +13,7 @@ import { Badge } from "@/components/ui/badge";
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 
 const STATUS_OPTIONS = ["Strong", "Good", "Solid", "Steady", "In Progress", "Re-engaged", "Critical"];
-const TABS = ["submissions", "stats", "captains", "volunteers"] as const;
+const TABS = ["submissions", "stats", "captains", "volunteers", "captain-mgmt"] as const;
 type Tab = typeof TABS[number];
 
 interface SiteStats {
@@ -49,6 +49,23 @@ interface Commitment {
 interface ImportResult {
   added: number;
   skipped: number;
+}
+
+interface CaptainProfile {
+  id: number;
+  name: string;
+  phone: string | null;
+  pinHash: string | null;
+  lastLoginAt: string | null;
+}
+
+interface CaptainNote {
+  id: number;
+  street: string;
+  houseNumber: string;
+  captainName: string;
+  note: string;
+  updatedAt: string;
 }
 
 interface Volunteer {
@@ -91,6 +108,12 @@ export default function Admin() {
   const [importError, setImportError] = useState("");
   const [testNotifyState, setTestNotifyState] = useState<"idle" | "loading" | "ok" | "unconfigured" | "error">("idle");
   const [testNotifyDetail, setTestNotifyDetail] = useState("");
+  const [pinEdits, setPinEdits] = useState<Record<number, string>>({});
+  const [phoneEdits, setPhoneEdits] = useState<Record<number, string>>({});
+  const [savedProfiles, setSavedProfiles] = useState<Set<number>>(new Set());
+  const [newProfileName, setNewProfileName] = useState("");
+  const [newProfilePhone, setNewProfilePhone] = useState("");
+  const [showAddProfile, setShowAddProfile] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const qc = useQueryClient();
@@ -181,6 +204,57 @@ export default function Admin() {
         body: JSON.stringify({ paymentConfirmed }),
       }).then(async r => { if (!r.ok) throw new Error(await r.text()); return r.json(); }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["commitments"] }),
+  });
+
+  const { data: captainProfiles = [] } = useQuery<CaptainProfile[]>({
+    queryKey: ["captain-profiles"],
+    queryFn: () => fetch(`${BASE}/api/captain/management`, { headers: authHeaders }).then(async r => {
+      if (!r.ok) throw new Error(await r.text()); return r.json();
+    }),
+    enabled: authed && activeTab === "captain-mgmt",
+  });
+
+  const { data: captainNotes = [] } = useQuery<CaptainNote[]>({
+    queryKey: ["captain-notes"],
+    queryFn: () => fetch(`${BASE}/api/captain/management/notes`, { headers: authHeaders }).then(async r => {
+      if (!r.ok) throw new Error(await r.text()); return r.json();
+    }),
+    enabled: authed && activeTab === "captain-mgmt",
+  });
+
+  const updateCaptainProfile = useMutation({
+    mutationFn: ({ id, ...body }: { id: number; pin?: string; phone?: string }) =>
+      fetch(`${BASE}/api/captain/management/${id}`, {
+        method: "PUT",
+        headers: { ...authHeaders, "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      }).then(async r => { if (!r.ok) throw new Error(await r.text()); return r.json(); }),
+    onSuccess: (_data, vars) => {
+      qc.invalidateQueries({ queryKey: ["captain-profiles"] });
+      setSavedProfiles(prev => new Set([...prev, vars.id]));
+      setPinEdits(prev => { const n = { ...prev }; delete n[vars.id]; return n; });
+      setTimeout(() => setSavedProfiles(prev => { const n = new Set(prev); n.delete(vars.id); return n; }), 3000);
+    },
+  });
+
+  const createCaptainProfile = useMutation({
+    mutationFn: (body: { name: string; phone: string }) =>
+      fetch(`${BASE}/api/captain/management/profiles`, {
+        method: "POST",
+        headers: { ...authHeaders, "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      }).then(async r => { if (!r.ok) throw new Error(await r.text()); return r.json(); }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["captain-profiles"] });
+      setNewProfileName(""); setNewProfilePhone(""); setShowAddProfile(false);
+    },
+  });
+
+  const deleteCaptainProfile = useMutation({
+    mutationFn: (id: number) =>
+      fetch(`${BASE}/api/captain/management/${id}`, { method: "DELETE", headers: authHeaders })
+        .then(async r => { if (!r.ok) throw new Error(await r.text()); return r.json(); }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["captain-profiles"] }),
   });
 
   const handleTestNotify = async () => {
@@ -443,7 +517,7 @@ export default function Admin() {
 
         {/* Tabs */}
         <div className="flex gap-1 border-b border-border">
-          {([ ["submissions", ClipboardList, "Submissions"], ["stats", BarChart3, "Stats"], ["captains", Users, "Captains"], ["volunteers", Shield, "Volunteers"] ] as const).map(([tab, Icon, label]) => (
+          {([ ["submissions", ClipboardList, "Submissions"], ["stats", BarChart3, "Stats"], ["captains", Users, "Captains"], ["volunteers", Shield, "Volunteers"], ["captain-mgmt", Key, "Captain Portal"] ] as const).map(([tab, Icon, label]) => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
@@ -847,6 +921,166 @@ export default function Admin() {
               )}
             </CardContent>
           </Card>
+        )}
+
+        {/* Captain Portal Management Tab */}
+        {activeTab === "captain-mgmt" && (
+          <div className="space-y-6">
+
+            {/* Captain Profiles */}
+            <Card className="bg-card border-card-border">
+              <CardHeader className="flex flex-row items-center justify-between gap-4 pb-4">
+                <div>
+                  <CardTitle className="text-xl">Captain Profiles</CardTitle>
+                  <p className="text-sm text-muted-foreground mt-1">Set phone numbers and PINs for each captain so they can log into the Captain Portal.</p>
+                </div>
+                <Button size="sm" variant="outline" className="gap-2 shrink-0" onClick={() => setShowAddProfile(p => !p)}>
+                  <Users className="h-4 w-4" />
+                  {showAddProfile ? "Cancel" : "Add Captain"}
+                </Button>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                {showAddProfile && (
+                  <div className="flex gap-2 items-end p-3 rounded-lg bg-background/50 border border-primary/30">
+                    <div className="flex-1 space-y-1">
+                      <Label className="text-xs">Name (must match street captain name exactly)</Label>
+                      <Input value={newProfileName} onChange={e => setNewProfileName(e.target.value)} placeholder="e.g. Carina" className="bg-background border-border h-8 text-sm" />
+                    </div>
+                    <div className="w-40 space-y-1">
+                      <Label className="text-xs">Phone</Label>
+                      <Input value={newProfilePhone} onChange={e => setNewProfilePhone(e.target.value)} placeholder="+27821234567" className="bg-background border-border h-8 text-sm" />
+                    </div>
+                    <Button size="sm" className="h-8" disabled={!newProfileName.trim() || createCaptainProfile.isPending} onClick={() => createCaptainProfile.mutate({ name: newProfileName.trim(), phone: newProfilePhone.trim() })}>
+                      {createCaptainProfile.isPending ? "Adding…" : "Add"}
+                    </Button>
+                  </div>
+                )}
+
+                {captainProfiles.length === 0 ? (
+                  <div className="text-center py-8 space-y-2">
+                    <Key className="h-8 w-8 text-muted-foreground/40 mx-auto" />
+                    <p className="text-sm text-muted-foreground">Loading captain profiles…</p>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    <div className="grid grid-cols-12 gap-3 px-3 py-2 text-xs font-medium text-muted-foreground uppercase tracking-wide border-b border-border">
+                      <div className="col-span-3">Captain</div>
+                      <div className="col-span-3">Phone</div>
+                      <div className="col-span-2">PIN</div>
+                      <div className="col-span-2">Last Login</div>
+                      <div className="col-span-2">Status</div>
+                    </div>
+                    {captainProfiles.map(p => {
+                      const streets = captains.filter(c => c.captain === p.name).map(c => c.street);
+                      const isSaved = savedProfiles.has(p.id);
+                      return (
+                        <div key={p.id} className="grid grid-cols-12 gap-3 items-center px-3 py-3 rounded-lg bg-background/50 border border-border">
+                          <div className="col-span-3">
+                            <p className="font-medium text-sm">{p.name}</p>
+                            <p className="text-xs text-muted-foreground">{streets.length > 0 ? streets.join(", ") : "—"}</p>
+                          </div>
+                          <div className="col-span-3">
+                            <Input
+                              value={phoneEdits[p.id] ?? p.phone ?? ""}
+                              onChange={e => setPhoneEdits(prev => ({ ...prev, [p.id]: e.target.value }))}
+                              placeholder="+27821234567"
+                              className="bg-background border-border h-7 text-xs"
+                            />
+                          </div>
+                          <div className="col-span-2">
+                            <Input
+                              type="password"
+                              value={pinEdits[p.id] ?? ""}
+                              onChange={e => setPinEdits(prev => ({ ...prev, [p.id]: e.target.value.replace(/\D/g, "").slice(0, 4) }))}
+                              placeholder={p.pinHash ? "••••" : "Set PIN"}
+                              maxLength={4}
+                              className="bg-background border-border h-7 text-xs tracking-widest text-center"
+                            />
+                          </div>
+                          <div className="col-span-2">
+                            <p className="text-xs text-muted-foreground">
+                              {p.lastLoginAt
+                                ? new Date(p.lastLoginAt).toLocaleDateString("en-ZA", { day: "2-digit", month: "short" })
+                                : "Never"}
+                            </p>
+                          </div>
+                          <div className="col-span-2 flex items-center gap-1 justify-end">
+                            {isSaved ? (
+                              <span className="text-xs text-green-400 flex items-center gap-1"><CheckCircle className="h-3 w-3" /> Saved</span>
+                            ) : (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="h-6 text-xs px-2 gap-1 border-border"
+                                disabled={updateCaptainProfile.isPending}
+                                onClick={() => {
+                                  const phone = phoneEdits[p.id] !== undefined ? phoneEdits[p.id] : p.phone ?? "";
+                                  const pin = pinEdits[p.id] ?? "";
+                                  updateCaptainProfile.mutate({ id: p.id, phone, ...(pin ? { pin } : {}) });
+                                }}
+                              >
+                                <Save className="h-3 w-3" />
+                                Save
+                              </Button>
+                            )}
+                            <button
+                              onClick={() => { if (confirm(`Remove ${p.name} from the portal? They will no longer be able to log in.`)) deleteCaptainProfile.mutate(p.id); }}
+                              className="text-muted-foreground hover:text-red-400 transition-colors p-1 rounded"
+                              title="Delete"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                    <p className="text-xs text-muted-foreground pt-1">{captainProfiles.filter(p => p.pinHash).length} of {captainProfiles.length} captains have a PIN set</p>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* Captain Notes */}
+            <Card className="bg-card border-card-border">
+              <CardHeader className="pb-4">
+                <CardTitle className="text-xl">Captain Notes</CardTitle>
+                <p className="text-sm text-muted-foreground mt-1">All notes added by captains during their door-to-door visits.</p>
+              </CardHeader>
+              <CardContent>
+                {captainNotes.length === 0 ? (
+                  <div className="text-center py-8 space-y-2">
+                    <MessageSquare className="h-8 w-8 text-muted-foreground/40 mx-auto" />
+                    <p className="text-sm text-muted-foreground">No captain notes yet.</p>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    <div className="grid grid-cols-12 gap-3 px-3 py-2 text-xs font-medium text-muted-foreground uppercase tracking-wide border-b border-border">
+                      <div className="col-span-2">Street</div>
+                      <div className="col-span-1">No.</div>
+                      <div className="col-span-2">Captain</div>
+                      <div className="col-span-6">Note</div>
+                      <div className="col-span-1">Date</div>
+                    </div>
+                    {captainNotes.map(n => (
+                      <div key={n.id} className="grid grid-cols-12 gap-3 items-start px-3 py-3 rounded-lg bg-background/50 border border-border">
+                        <div className="col-span-2"><p className="text-sm">{n.street}</p></div>
+                        <div className="col-span-1"><p className="text-sm text-muted-foreground">{n.houseNumber}</p></div>
+                        <div className="col-span-2"><p className="text-xs text-muted-foreground">{n.captainName}</p></div>
+                        <div className="col-span-6"><p className="text-xs leading-relaxed">{n.note}</p></div>
+                        <div className="col-span-1">
+                          <p className="text-xs text-muted-foreground whitespace-nowrap">
+                            {new Date(n.updatedAt).toLocaleDateString("en-ZA", { day: "2-digit", month: "short" })}
+                          </p>
+                        </div>
+                      </div>
+                    ))}
+                    <p className="text-xs text-muted-foreground pt-1">{captainNotes.length} note{captainNotes.length !== 1 ? "s" : ""}</p>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+          </div>
         )}
 
       </main>

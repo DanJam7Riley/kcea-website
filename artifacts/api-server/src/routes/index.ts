@@ -5,6 +5,7 @@ import captainsRouter from "./captains";
 import commitmentsRouter from "./commitments";
 import volunteersRouter from "./volunteers";
 import notifyRouter from "./notify";
+import captainPortalRouter from "./captain-portal";
 
 const router: IRouter = Router();
 
@@ -14,5 +15,6 @@ router.use(captainsRouter);
 router.use(commitmentsRouter);
 router.use(volunteersRouter);
 router.use(notifyRouter);
+router.use(captainPortalRouter);
 
 export default router;

@@ -59,3 +59,39 @@ export const volunteersTable = pgTable("volunteers", {
 export const insertVolunteerSchema = createInsertSchema(volunteersTable).omit({ id: true, submittedAt: true });
 export type Volunteer = typeof volunteersTable.$inferSelect;
 export type InsertVolunteer = z.infer<typeof insertVolunteerSchema>;
+
+// ── Captain Portal ─────────────────────────────────────────────
+export const captainProfilesTable = pgTable("captain_profiles", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull(),
+  phone: text("phone"),
+  pinHash: text("pin_hash"),
+  lastLoginAt: timestamp("last_login_at"),
+});
+export type CaptainProfile = typeof captainProfilesTable.$inferSelect;
+
+export const captainTokensTable = pgTable("captain_tokens", {
+  id: serial("id").primaryKey(),
+  profileId: integer("profile_id").notNull(),
+  token: text("token").notNull().unique(),
+  expiresAt: timestamp("expires_at").notNull(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const propertyNotesTable = pgTable("property_notes", {
+  id: serial("id").primaryKey(),
+  street: text("street").notNull(),
+  houseNumber: text("house_number").notNull(),
+  profileId: integer("profile_id").notNull(),
+  captainName: text("captain_name").notNull(),
+  note: text("note").notNull(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+export type PropertyNote = typeof propertyNotesTable.$inferSelect;
+
+export const streetHousesTable = pgTable("street_houses", {
+  id: serial("id").primaryKey(),
+  street: text("street").notNull(),
+  houseNumber: text("house_number").notNull(),
+});
+export type StreetHouse = typeof streetHousesTable.$inferSelect;
