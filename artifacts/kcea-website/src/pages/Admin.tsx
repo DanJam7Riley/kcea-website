@@ -38,6 +38,14 @@ function makeWhatsAppUrl(phone: string, missingFields: string[]): string | null 
   return `https://wa.me/${normalized}?text=${encodeURIComponent(msg)}`;
 }
 
+function makeResidentWaUrl(phone: string, message: string): string | null {
+  const digits = phone.replace(/[\s()\-+]/g, "");
+  if (!digits || digits.length < 7) return null;
+  const normalized = digits.startsWith("0") ? "27" + digits.slice(1) : digits;
+  if (!/^\d{10,15}$/.test(normalized)) return null;
+  return `https://wa.me/${normalized}?text=${encodeURIComponent(message)}`;
+}
+
 interface SiteStats {
   id: number;
   committedHouseholds: number;
@@ -92,6 +100,7 @@ interface SiteSettings {
   twilioAccountSid: string | null;
   twilioAuthToken: string | null;
   twilioWhatsappFrom: string | null;
+  notifyWhatsapp: string | null;
   updatedAt: string;
 }
 
@@ -141,6 +150,7 @@ export default function Admin() {
   const [settingsSid, setSettingsSid] = useState<string | null>(null);
   const [settingsToken, setSettingsToken] = useState<string | null>(null);
   const [settingsFrom, setSettingsFrom] = useState<string | null>(null);
+  const [settingsNotify, setSettingsNotify] = useState<string | null>(null);
   const [settingsSaved, setSettingsSaved] = useState(false);
   const [setPinLoading, setSetPinLoading] = useState<Set<number>>(new Set());
   const [setPinResult, setSetPinResult] = useState<Record<number, { pin: string; sent: boolean }>>({});
@@ -299,7 +309,7 @@ export default function Admin() {
   });
 
   const saveSettings = useMutation({
-    mutationFn: (data: { twilioAccountSid: string; twilioAuthToken: string; twilioWhatsappFrom: string }) =>
+    mutationFn: (data: { twilioAccountSid: string; twilioAuthToken: string; twilioWhatsappFrom: string; notifyWhatsapp: string }) =>
       fetch(`${BASE}/api/settings`, {
         method: "PUT",
         headers: { ...authHeaders, "Content-Type": "application/json" },
@@ -887,7 +897,7 @@ export default function Admin() {
                             ))}
                           </select>
                         </div>
-                        <div className="col-span-3 flex items-center pt-0.5">
+                        <div className="col-span-3 flex flex-col items-start gap-1.5 pt-0.5">
                           <button
                             onClick={() => toggleCaptainStatus.mutate({
                               id: c.id,
@@ -903,6 +913,24 @@ export default function Admin() {
                             {isToggling ? <RefreshCw className="h-3 w-3 animate-spin" /> : null}
                             {isActive ? "Active Captain" : "Pending / New Volunteer"}
                           </button>
+                          {!isActive && c.phone && (() => {
+                            const msg = `Hi ${c.captain}, thank you for volunteering to be a Street Captain for ${c.street}! Your application is under review. The KCEA committee will be in touch soon. Questions? WhatsApp us at 0832355052.`;
+                            const url = makeResidentWaUrl(c.phone, msg);
+                            return url ? (
+                              <a href={url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs text-green-400 bg-green-500/10 border border-green-500/20 hover:bg-green-500/20 transition-colors">
+                                <MessageSquare className="h-3 w-3" />Thank-you WhatsApp
+                              </a>
+                            ) : null;
+                          })()}
+                          {isActive && c.phone && (() => {
+                            const msg = `Hi ${c.captain}, you have been confirmed as Street Captain for ${c.street}! Welcome to the team. Your captain portal: attached-assets-janineriley.replit.app/captain-login${c.email ? ` | Username: ${c.email}` : ""}. The KCEA committee will send your PIN separately. Questions? WhatsApp 0832355052.`;
+                            const url = makeResidentWaUrl(c.phone, msg);
+                            return url ? (
+                              <a href={url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs text-blue-400 bg-blue-500/10 border border-blue-500/20 hover:bg-blue-500/20 transition-colors">
+                                <MessageSquare className="h-3 w-3" />Approval WhatsApp
+                              </a>
+                            ) : null;
+                          })()}
                         </div>
                         <div className="col-span-2 flex items-center gap-2 pt-0.5">
                           <Button
@@ -1214,10 +1242,55 @@ export default function Admin() {
             <Card className="bg-card border-card-border">
               <CardHeader className="pb-4">
                 <div className="flex items-center gap-3">
+                  <div className="bg-green-500/20 p-2 rounded-lg"><MessageSquare className="h-5 w-5 text-green-400" /></div>
+                  <div>
+                    <CardTitle className="text-xl">Admin Notification Number</CardTitle>
+                    <p className="text-sm text-muted-foreground mt-1">WhatsApp number that receives automatic notifications when new commitments or captain applications come in. Stored securely — never shown on the public site.</p>
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-5">
+                <div className="space-y-2">
+                  <Label htmlFor="notify-wa">Admin WhatsApp Number</Label>
+                  <Input
+                    id="notify-wa"
+                    value={settingsNotify ?? siteSettings?.notifyWhatsapp ?? ""}
+                    onChange={e => setSettingsNotify(e.target.value)}
+                    placeholder="0832355052"
+                    className="bg-background border-border font-mono text-sm"
+                  />
+                  <p className="text-xs text-muted-foreground">South African mobile number (e.g. 0832355052). Normalised to +27 format automatically.</p>
+                </div>
+                <div className="flex items-center gap-3 pt-1">
+                  <Button
+                    onClick={() => saveSettings.mutate({
+                      twilioAccountSid: settingsSid ?? siteSettings?.twilioAccountSid ?? "",
+                      twilioAuthToken: settingsToken ?? siteSettings?.twilioAuthToken ?? "",
+                      twilioWhatsappFrom: settingsFrom ?? siteSettings?.twilioWhatsappFrom ?? "",
+                      notifyWhatsapp: settingsNotify ?? siteSettings?.notifyWhatsapp ?? "",
+                    })}
+                    disabled={saveSettings.isPending}
+                    className="bg-primary text-primary-foreground hover:bg-primary/90 gap-2"
+                  >
+                    <Save className="h-4 w-4" />
+                    {saveSettings.isPending ? "Saving…" : "Save number"}
+                  </Button>
+                  {settingsSaved && (
+                    <span className="text-sm text-green-400 flex items-center gap-1.5">
+                      <CheckCircle className="h-4 w-4" /> Saved
+                    </span>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card className="bg-card border-card-border">
+              <CardHeader className="pb-4">
+                <div className="flex items-center gap-3">
                   <div className="bg-primary/20 p-2 rounded-lg"><Settings className="h-5 w-5 text-primary" /></div>
                   <div>
                     <CardTitle className="text-xl">Twilio WhatsApp Credentials</CardTitle>
-                    <p className="text-sm text-muted-foreground mt-1">These credentials are used to send PIN messages to street captains via WhatsApp.</p>
+                    <p className="text-sm text-muted-foreground mt-1">These credentials are used to send PIN messages to street captains and automatic notifications via WhatsApp.</p>
                   </div>
                 </div>
               </CardHeader>
@@ -1263,6 +1336,7 @@ export default function Admin() {
                       twilioAccountSid: settingsSid ?? siteSettings?.twilioAccountSid ?? "",
                       twilioAuthToken: settingsToken ?? siteSettings?.twilioAuthToken ?? "",
                       twilioWhatsappFrom: settingsFrom ?? siteSettings?.twilioWhatsappFrom ?? "",
+                      notifyWhatsapp: settingsNotify ?? siteSettings?.notifyWhatsapp ?? "",
                     })}
                     disabled={saveSettings.isPending}
                     className="bg-primary text-primary-foreground hover:bg-primary/90 gap-2"

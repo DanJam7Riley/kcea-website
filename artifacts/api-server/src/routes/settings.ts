@@ -39,6 +39,9 @@ router.put("/settings", async (req, res) => {
   if (typeof body.twilioWhatsappFrom === "string") {
     patch.twilioWhatsappFrom = body.twilioWhatsappFrom.trim() || null;
   }
+  if (typeof body.notifyWhatsapp === "string") {
+    patch.notifyWhatsapp = body.notifyWhatsapp.trim() || null;
+  }
 
   try {
     const existing = await getOrCreateSettings();

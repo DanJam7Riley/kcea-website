@@ -1,6 +1,8 @@
 import { Router } from "express";
 import { db, commitmentsTable } from "@workspace/db";
 import { eq, desc, sql } from "drizzle-orm";
+import { sendWhatsApp, adminCommitmentMsg, adminIncompleteRecordMsg } from "../lib/whatsapp";
+import { getNotifyNumber } from "../lib/settings";
 
 const router = Router();
 
@@ -24,6 +26,19 @@ router.post("/commitments", async (req, res) => {
       .insert(commitmentsTable)
       .values({ fullName, email, phone, street, houseNumber, commitmentType, imported: false, paymentConfirmed: false })
       .returning();
+
+    getNotifyNumber().then(adminNumber => {
+      if (!adminNumber) return;
+      sendWhatsApp(adminCommitmentMsg(fullName, street, houseNumber, phone), adminNumber).catch(() => {});
+
+      const missing: string[] = [];
+      if (!fullName) missing.push("Name");
+      if (!phone || phone === "-") missing.push("Phone");
+      if (!email || email.toLowerCase() === "imported@kcea.local") missing.push("Email");
+      if (missing.length > 0) {
+        sendWhatsApp(adminIncompleteRecordMsg(street, houseNumber, missing), adminNumber).catch(() => {});
+      }
+    }).catch(() => {});
 
     res.status(201).json(created);
   } catch (err) {
