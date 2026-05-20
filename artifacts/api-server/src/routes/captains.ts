@@ -84,6 +84,33 @@ router.post("/captains", async (req, res) => {
   }
 });
 
+router.post("/captains/:id/welcomed", async (req, res) => {
+  if (!isAdmin(req)) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+  const id = parseInt(req.params.id, 10);
+  if (isNaN(id)) {
+    res.status(400).json({ error: "Invalid id" });
+    return;
+  }
+  try {
+    const [updated] = await db
+      .update(streetCaptainsTable)
+      .set({ welcomedAt: new Date() })
+      .where(eq(streetCaptainsTable.id, id))
+      .returning();
+    if (!updated) {
+      res.status(404).json({ error: "Captain not found" });
+      return;
+    }
+    res.json(updated);
+  } catch (err) {
+    req.log.error(err);
+    res.status(500).json({ error: "Failed to mark welcomed" });
+  }
+});
+
 router.put("/captains/:id", async (req, res) => {
   if (!isAdmin(req)) {
     res.status(401).json({ error: "Unauthorized" });

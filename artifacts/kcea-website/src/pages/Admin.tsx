@@ -63,6 +63,7 @@ interface StreetCaptain {
   email: string | null;
   motivation: string | null;
   captainStatus: string;
+  welcomedAt: string | null;
   submittedAt: string;
 }
 
@@ -212,6 +213,13 @@ export default function Admin() {
       fetch(`${BASE}/api/commitments/${id}`, { method: "DELETE", headers: authHeaders })
         .then(async r => { if (!r.ok) throw new Error(await r.text()); return r.json(); }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["commitments"] }),
+  });
+
+  const markWelcomed = useMutation({
+    mutationFn: (id: number) =>
+      fetch(`${BASE}/api/captains/${id}/welcomed`, { method: "POST", headers: authHeaders })
+        .then(async r => { if (!r.ok) throw new Error(await r.text()); return r.json(); }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["captains"] }),
   });
 
   const toggleCaptainStatus = useMutation({
@@ -887,7 +895,7 @@ export default function Admin() {
                             defaultValue={c.phone ?? ""}
                             key={`phone-${c.id}-${c.phone ?? ""}`}
                             onChange={e => handleCaptainChange(c.id, "phone", e.target.value)}
-                            placeholder="082 123 4567"
+                            placeholder=""
                             className="bg-card border-border text-sm h-8"
                           />
                         </div>
@@ -919,23 +927,28 @@ export default function Admin() {
                             {isToggling ? <RefreshCw className="h-3 w-3 animate-spin" /> : null}
                             {isActive ? "Active Captain" : "Pending / New Volunteer"}
                           </button>
-                          {!isActive && c.phone && (() => {
-                            const msg = `Hi ${c.captain}, thank you for volunteering to be a Street Captain for ${c.street}! Your application is under review. The KCEA committee will be in touch soon. Questions? WhatsApp us at ${adminWhatsapp}.`;
+                          {c.phone && (() => {
+                            const welcomed = !!c.welcomedAt;
+                            const msg = `Hi ${c.captain}, welcome to the KCEA Street Captain team for ${c.street}! Our new website is live and you can view your street's progress at https://attached-assets-janineriley.replit.app/captain-login${c.email ? ` | Username: ${c.email}` : ""}. Your PIN will be sent separately. Questions? WhatsApp ${adminWhatsapp}. - KCEA Team`;
                             const url = makeResidentWaUrl(c.phone, msg);
-                            return url ? (
-                              <a href={url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs text-green-400 bg-green-500/10 border border-green-500/20 hover:bg-green-500/20 transition-colors">
-                                <MessageSquare className="h-3 w-3" />WhatsApp Applicant
+                            if (!url) return null;
+                            return (
+                              <a
+                                href={url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                onClick={() => markWelcomed.mutate(c.id)}
+                                className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs border transition-colors ${
+                                  welcomed
+                                    ? "text-blue-400 bg-blue-500/10 border-blue-500/20 hover:bg-blue-500/20"
+                                    : "text-green-400 bg-green-500/10 border-green-500/20 hover:bg-green-500/20"
+                                }`}
+                                title={welcomed ? `Welcomed ${new Date(c.welcomedAt!).toLocaleDateString()}` : "Send welcome WhatsApp"}
+                              >
+                                <MessageSquare className="h-3 w-3" />
+                                {welcomed ? "Resend Welcome" : "Send Welcome"}
                               </a>
-                            ) : null;
-                          })()}
-                          {isActive && c.phone && (() => {
-                            const msg = `Hi ${c.captain}, you have been confirmed as Street Captain for ${c.street}! Welcome to the team. Your captain portal: https://attached-assets-janineriley.replit.app/captain-login${c.email ? ` | Username: ${c.email}` : ""}. The KCEA committee will send your PIN separately. Questions? WhatsApp ${adminWhatsapp}.`;
-                            const url = makeResidentWaUrl(c.phone, msg);
-                            return url ? (
-                              <a href={url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs text-blue-400 bg-blue-500/10 border border-blue-500/20 hover:bg-blue-500/20 transition-colors">
-                                <MessageSquare className="h-3 w-3" />Approval WhatsApp
-                              </a>
-                            ) : null;
+                            );
                           })()}
                         </div>
                         <div className="col-span-2 flex items-center gap-2 pt-0.5">

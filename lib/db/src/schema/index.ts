@@ -21,6 +21,7 @@ export const streetCaptainsTable = pgTable("street_captains", {
   email: text("email"),
   motivation: text("motivation"),
   captainStatus: text("captain_status").notNull().default("Active Captain"),
+  welcomedAt: timestamp("welcomed_at"),
   submittedAt: timestamp("submitted_at").notNull().defaultNow(),
 });
 
