@@ -157,13 +157,27 @@ export default function Home() {
     staleTime: 30_000,
   });
 
-  // Per-street committed counts and totals derived from /api/captains (one row per street).
-  // Co-captain streets appear as duplicate rows, so we de-dupe on street + take the MAX target.
+  // Per-street committed counts and totals derived from /api/captains (one row per captain).
+  // Co-captain streets have multiple rows, so we group by street: max target, sum committed (same
+  // count is reported on every row for a street so we just take the max), and join captain names.
   const streetCommittedCounts: Record<string, number> = {};
   const streetTargets: Record<string, number> = {};
+  const streetGroups: Array<{ street: string; captains: string; status: string; targetHouseholds: number }> = [];
+  const streetIndex: Record<string, number> = {};
   for (const c of captains) {
-    streetCommittedCounts[c.street] = c.committedHouseholds ?? 0;
+    streetCommittedCounts[c.street] = Math.max(streetCommittedCounts[c.street] ?? 0, c.committedHouseholds ?? 0);
     streetTargets[c.street] = Math.max(streetTargets[c.street] ?? 0, c.targetHouseholds ?? 30);
+    const idx = streetIndex[c.street];
+    if (idx === undefined) {
+      streetIndex[c.street] = streetGroups.length;
+      streetGroups.push({ street: c.street, captains: c.captain, status: c.status, targetHouseholds: streetTargets[c.street] });
+    } else {
+      const g = streetGroups[idx]!;
+      if (c.captain && !g.captains.split(" & ").includes(c.captain)) {
+        g.captains = `${g.captains} & ${c.captain}`;
+      }
+      g.targetHouseholds = streetTargets[c.street];
+    }
   }
   const totalCommittedHouseholds = Object.values(streetCommittedCounts).reduce((a, b) => a + b, 0);
   const totalTargetHouseholds = Object.values(streetTargets).reduce((a, b) => a + b, 0);
@@ -617,7 +631,7 @@ export default function Home() {
           </div>
 
           <div className="grid sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-            {captains.map((street, i) => (
+            {streetGroups.map((street, i) => (
               <motion.div
                 key={street.street}
                 initial={{ opacity: 0, y: 10 }}
@@ -633,7 +647,7 @@ export default function Home() {
                         <p className="text-xs text-muted-foreground/80 italic">Complex on Nile St</p>
                       )}
                       <p className="text-sm text-muted-foreground flex items-center gap-1">
-                        <Users className="h-3 w-3" /> {street.captain}
+                        <Users className="h-3 w-3" /> {street.captains}
                       </p>
                     </div>
                     <div className="space-y-2 mt-auto">
