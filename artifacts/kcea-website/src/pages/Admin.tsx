@@ -1289,7 +1289,7 @@ export default function Admin() {
                                   <div className="flex items-center gap-2 flex-wrap">
                                     <span className="font-mono text-lg font-bold text-primary tracking-[0.3em] bg-primary/10 px-3 py-1 rounded-md">{pinResult.pin}</span>
                                     {p.phone && (() => {
-                                      const msg = `Hi ${p.name}, your KCEA Captain Portal login: attached-assets-janineriley.replit.app/captain-login | 📱 Phone number: ${p.phone} | PIN: ${pinResult.pin}. Keep your PIN private. Questions? WhatsApp ${adminWhatsapp}.`;
+                                      const msg = `Hi ${p.name}, your KCEA Captain Portal login: https://attached-assets-janineriley.replit.app/captain-login | 📱 Phone number: ${p.phone} | PIN: ${pinResult.pin}. Keep your PIN private. Questions? WhatsApp ${adminWhatsapp}.`;
                                       const url = makeResidentWaUrl(p.phone, msg);
                                       if (!url) return null;
                                       const sent = !!p.pinSentAt;
@@ -1321,7 +1321,7 @@ export default function Admin() {
                                   <div className="flex items-center gap-2 flex-wrap">
                                     <span className="font-mono text-lg font-bold text-foreground tracking-[0.3em] bg-background border border-border px-3 py-1 rounded-md">{p.pin}</span>
                                     {p.phone && (() => {
-                                      const msg = `Hi ${p.name}, your KCEA Captain Portal login: attached-assets-janineriley.replit.app/captain-login | 📱 Phone number: ${p.phone} | PIN: ${p.pin}. Keep your PIN private. Questions? WhatsApp ${adminWhatsapp}.`;
+                                      const msg = `Hi ${p.name}, your KCEA Captain Portal login: https://attached-assets-janineriley.replit.app/captain-login | 📱 Phone number: ${p.phone} | PIN: ${p.pin}. Keep your PIN private. Questions? WhatsApp ${adminWhatsapp}.`;
                                       const url = makeResidentWaUrl(p.phone, msg);
                                       if (!url) return null;
                                       const sent = !!p.pinSentAt;
