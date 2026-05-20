@@ -93,12 +93,13 @@ const STREET_OPTIONS: { value: string; label: string }[] = [
 
 const faqs = [
   { q: "What is the KCEA enclosure project?", a: "The Kensington Central Enclosure Association (KCEA) is a resident-led initiative to secure our neighbourhood through controlled access points, LPR cameras, and armed response integration. We are applying to the City of Johannesburg under the Security Access Restriction Policy 2018. The project is entirely community-funded and community-driven." },
-  { q: "How much does it cost per household?", a: "R250 per month on an ongoing basis, or R3,000 as a once-off upfront payment (equivalent to 12 months). Households can also choose both options. Speak to your street captain if cost is a concern." },
+  { q: "How much does it cost per household?", a: "R250 per month on an ongoing basis, or R3,000 as a once-off upfront payment (equivalent to 12 months paid in advance). The R250 is a permanent monthly levy — it funds Phase 1 right now (consultant, Traffic Impact Study, Council application) and then continues after installation to cover ongoing security staffing, maintenance, and monitoring. Speak to your street captain if cost is a concern." },
   { q: "How many households have committed so far?", a: "191 households as of 19 May 2026, generating approximately R47,750 per month. Our target is 680+ households." },
   { q: "What is the timeline for the enclosure to be built?", a: "Phase 1 (now–5 months): Raise R200,000 for the consultant, Traffic Impact Study, and application. Phase 2 (5–8 months): City approval and raise remaining R1.8 million. Phase 3 (8–11 months): Install gates, cameras, and armed response — go live." },
   { q: "How does the application process work?", a: "We apply under the CoJ Security Access Restriction Policy 2018 via the JRA. Requirements: 60% property owner consent, a Traffic Impact Study, and full financial backing." },
   { q: "Will the enclosure close all streets?", a: "No — boom gates will be installed at key entry and exit points only. Emergency vehicles, Pikitup, and public transport maintain access at all times. Pedestrian access is legally required at every point and will be provided." },
-  { q: "Can I pay monthly or as a lump sum?", a: "Both. R250/month ongoing or R3,000 once-off. Paying upfront helps us reach Phase 1 faster. Submit the form and your street captain will be in touch with payment details." },
+  { q: "Can I pay monthly or as a lump sum?", a: "Both. R250/month ongoing, or R3,000 once-off (equivalent to 12 months in advance). Paying upfront gives us a lump sum to kickstart Phase 1 faster. Submit the form and your street captain will be in touch with payment details." },
+  { q: "What happens to my money if the Council doesn't approve the application?", a: "Council approval is not guaranteed. If the application is not approved, any funds still on hand — i.e. not yet spent on the consultant, Traffic Impact Study, or Council application costs — will be refunded to contributors proportionally to what they paid in. We want every resident to understand this risk before committing." },
   { q: "What if I don't want to commit financially?", a: "The project depends on community funding. If you're not ready, you can still help by sharing this site, supporting your street captain, or volunteering as a captain yourself." },
   { q: "Is there a street captain for my street?", a: "Most streets are listed above. If yours shows 'Assigned' or is missing, email Jomartins111@gmail.com or use the volunteer form to step up." },
   { q: "How do I know my payment was received?", a: "Email proof of payment to Jomartins111@gmail.com with your name and street in the subject line. Your street captain will confirm receipt." }
@@ -433,6 +434,58 @@ export default function Home() {
             <h2 className="text-3xl md:text-4xl font-bold">Make Your Commitment</h2>
             <p className="text-muted-foreground">Join {totalCommittedHouseholds} of your neighbours. We offer both monthly and once-off contribution options.</p>
           </div>
+
+          {/* Where your money goes — transparency explainer */}
+          <Card className="bg-card border-card-border max-w-4xl mx-auto" data-testid="card-payment-explainer">
+            <CardContent className="p-6 sm:p-8 space-y-5">
+              <div className="flex items-center gap-3">
+                <AlertCircle className="h-6 w-6 text-accent shrink-0" />
+                <h3 className="text-xl font-bold">Where your contribution goes — and what you're signing up for</h3>
+              </div>
+
+              <div className="grid md:grid-cols-2 gap-4">
+                <div className="bg-background/50 border border-border rounded-lg p-4 space-y-2">
+                  <h4 className="font-semibold text-foreground flex items-center gap-2"><span className="text-primary">R250 / month</span> — what it pays for right now</h4>
+                  <p className="text-sm text-muted-foreground leading-relaxed">
+                    Your monthly contribution is being collected <strong className="text-foreground">immediately</strong> to fund Phase&nbsp;1: the consultant
+                    fees, the Traffic Impact Study, and the Council application. It is <strong className="text-foreground">not</strong> sitting
+                    aside waiting for hardware — it is actively paying to get the project approved.
+                  </p>
+                </div>
+
+                <div className="bg-background/50 border border-border rounded-lg p-4 space-y-2">
+                  <h4 className="font-semibold text-foreground flex items-center gap-2"><span className="text-primary">R3,000 once-off</span> — why it helps</h4>
+                  <p className="text-sm text-muted-foreground leading-relaxed">
+                    The once-off option gives us a lump sum to <strong className="text-foreground">kickstart Phase&nbsp;1 faster</strong>.
+                    It's equivalent to 12 months of R250 paid in advance, so the same contribution, just sooner — which means we reach
+                    the consultant and application milestones quicker.
+                  </p>
+                </div>
+
+                <div className="bg-background/50 border border-border rounded-lg p-4 space-y-2">
+                  <h4 className="font-semibold text-foreground">R250 / month is an <span className="text-primary">ongoing levy</span></h4>
+                  <p className="text-sm text-muted-foreground leading-relaxed">
+                    Even <strong className="text-foreground">after</strong> the gates and cameras are installed, the R250/month
+                    continues. It covers ongoing operational costs — security staffing, maintenance, and monitoring. Please
+                    sign up knowing this is a <strong className="text-foreground">permanent monthly commitment</strong>, not a
+                    once-off installation fee.
+                  </p>
+                </div>
+
+                <div className="bg-background/50 border border-border rounded-lg p-4 space-y-2">
+                  <h4 className="font-semibold text-foreground">If the application is <span className="text-primary">not approved</span> — refund policy</h4>
+                  <p className="text-sm text-muted-foreground leading-relaxed">
+                    Council approval is not guaranteed. If our application is <strong className="text-foreground">not approved</strong>,
+                    any funds still on hand (i.e. not yet spent on the consultant, Traffic Impact Study, or application costs) will be
+                    <strong className="text-foreground"> refunded to contributors proportionally</strong> to what they paid in. We want you to
+                    understand this risk before you commit.
+                  </p>
+                </div>
+              </div>
+
+              <p className="text-xs text-muted-foreground">Questions? Speak to your street captain or email Jomartins111@gmail.com.</p>
+            </CardContent>
+          </Card>
 
           <div className="grid lg:grid-cols-5 gap-8">
             <Card className="bg-card border-card-border lg:col-span-3">
