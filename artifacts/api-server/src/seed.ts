@@ -1,6 +1,24 @@
-import { db, siteStatsTable, streetCaptainsTable, commitmentsTable } from "@workspace/db";
-import { count, eq, isNull, or, sql } from "drizzle-orm";
+import { db, siteStatsTable, streetCaptainsTable, commitmentsTable, captainProfilesTable } from "@workspace/db";
+import { and, count, eq, sql } from "drizzle-orm";
 import { logger } from "./lib/logger";
+
+/** Canonical name renames so street_captains.captain matches captain_profiles.name exactly. */
+const NAME_NORMALIZATIONS: Array<{ street: string; from: string; to: string }> = [
+  { street: "Orion",   from: "Ingrid",  to: "Ingrid Bester" },
+  { street: "Mildura", from: "Garren",  to: "Garren Pillay" },
+];
+
+/** Captains that should be removed (e.g. assists tracked as a note on the primary captain). */
+const REMOVE_CAPTAINS: Array<{ street: string; captain: string }> = [
+  { street: "Mildura", captain: "Feroze" },
+];
+
+/** Stale captain_profiles rows superseded by canonical names. Merged into target then deleted. */
+const PROFILE_RENAMES: Array<{ from: string; to: string }> = [
+  { from: "Ingrid",                 to: "Ingrid Bester" },
+  { from: "Garren (Feroze assist)", to: "Garren Pillay" },
+  { from: "Garren",                 to: "Garren Pillay" },
+];
 
 const SEED_CAPTAINS = [
   { street: "Derby",        captain: "Carina",          forms: 30, status: "Strong"      },
@@ -58,38 +76,124 @@ async function splitCombinedCaptains(): Promise<number> {
   return inserted;
 }
 
-/** Backfill captain phone/email from matching commitment by name + street. Idempotent. */
-async function backfillCaptainPhones(): Promise<number> {
-  const captains = await db
-    .select()
-    .from(streetCaptainsTable)
-    .where(or(isNull(streetCaptainsTable.phone), eq(streetCaptainsTable.phone, "")));
-  let updated = 0;
-  for (const c of captains) {
-    if (c.captain === "Unassigned") continue;
-    const matches = await db
-      .select()
-      .from(commitmentsTable)
-      .where(
-        sql`LOWER(${commitmentsTable.fullName}) = LOWER(${c.captain}) AND LOWER(${commitmentsTable.street}) = LOWER(${c.street})`,
-      )
-      .limit(1);
-    const m = matches[0];
-    if (!m) continue;
-    const patch: Record<string, unknown> = {};
-    if (m.phone && m.phone !== "Unknown") patch.phone = m.phone;
-    if (m.email && m.email !== "Unknown" && !c.email) patch.email = m.email;
-    if (Object.keys(patch).length > 0) {
-      await db.update(streetCaptainsTable).set(patch).where(eq(streetCaptainsTable.id, c.id));
-      updated++;
-    }
-  }
-  return updated;
-}
-
 /** Self-healing schema guard — runs before any reads. Idempotent ADD COLUMN IF NOT EXISTS. */
 async function ensureSchema(): Promise<void> {
   await db.execute(sql`ALTER TABLE street_captains ADD COLUMN IF NOT EXISTS welcomed_at timestamp`);
+}
+
+/** Apply canonical name renames + remove non-captain assist rows. Idempotent. */
+async function applyNameNormalizations(): Promise<void> {
+  for (const n of NAME_NORMALIZATIONS) {
+    await db
+      .update(streetCaptainsTable)
+      .set({ captain: n.to })
+      .where(and(eq(streetCaptainsTable.street, n.street), eq(streetCaptainsTable.captain, n.from)));
+  }
+  for (const r of REMOVE_CAPTAINS) {
+    await db
+      .delete(streetCaptainsTable)
+      .where(and(eq(streetCaptainsTable.street, r.street), eq(streetCaptainsTable.captain, r.captain)));
+  }
+}
+
+/** Merge stale captain_profiles into canonical row (preserving phone/pin/pinHash/lastLoginAt),
+ *  re-point captain_tokens, then delete the stale row. Idempotent and lockout-safe. */
+async function mergeAndRemoveStaleProfiles(): Promise<number> {
+  let removed = 0;
+  for (const { from, to } of PROFILE_RENAMES) {
+    const [stale] = await db.select().from(captainProfilesTable).where(eq(captainProfilesTable.name, from));
+    if (!stale) continue;
+
+    let [target] = await db.select().from(captainProfilesTable).where(eq(captainProfilesTable.name, to));
+    if (!target) {
+      // No canonical row yet — just rename the stale row in place.
+      await db.update(captainProfilesTable).set({ name: to }).where(eq(captainProfilesTable.id, stale.id));
+      removed++;
+      continue;
+    }
+
+    const patch: Record<string, unknown> = {};
+    if (!target.phone && stale.phone) patch.phone = stale.phone;
+    if (!target.pinHash && stale.pinHash) {
+      patch.pinHash = stale.pinHash;
+      if (stale.pin) patch.pin = stale.pin;
+    }
+    if (!target.lastLoginAt && stale.lastLoginAt) patch.lastLoginAt = stale.lastLoginAt;
+    if (Object.keys(patch).length > 0) {
+      await db.update(captainProfilesTable).set(patch).where(eq(captainProfilesTable.id, target.id));
+    }
+    // Re-point any auth tokens from stale → canonical so sessions survive the merge.
+    await db.execute(
+      sql`UPDATE captain_tokens SET profile_id = ${target.id} WHERE profile_id = ${stale.id}`,
+    );
+    await db.delete(captainProfilesTable).where(eq(captainProfilesTable.id, stale.id));
+    removed++;
+  }
+  return removed;
+}
+
+/** Ensure a captain_profiles row exists for every assigned street_captains.captain. */
+async function syncCaptainProfiles(): Promise<number> {
+  const captains = await db.select().from(streetCaptainsTable);
+  const profiles = await db.select().from(captainProfilesTable);
+  const existing = new Set(profiles.map(p => p.name));
+  const needed = new Set<string>();
+  for (const c of captains) {
+    if (c.captain && c.captain !== "Unassigned") needed.add(c.captain);
+  }
+  const toInsert = [...needed].filter(n => !existing.has(n));
+  if (toInsert.length > 0) {
+    await db.insert(captainProfilesTable).values(toInsert.map(name => ({ name })));
+  }
+  return toInsert.length;
+}
+
+/** Backfill phones into street_captains AND captain_profiles by exact name match against commitments. */
+async function backfillPhonesEverywhere(): Promise<{ captains: number; profiles: number }> {
+  const commitments = await db.select().from(commitmentsTable);
+  const phoneByName = new Map<string, string>();
+  const emailByName = new Map<string, string>();
+  for (const c of commitments) {
+    if (!c.fullName) continue;
+    const key = c.fullName.trim().toLowerCase();
+    if (c.phone && c.phone !== "Unknown" && !phoneByName.has(key)) phoneByName.set(key, c.phone);
+    if (c.email && c.email !== "Unknown" && !emailByName.has(key)) emailByName.set(key, c.email);
+  }
+
+  let scUpdated = 0;
+  const scRows = await db.select().from(streetCaptainsTable);
+  for (const c of scRows) {
+    if (c.captain === "Unassigned") continue;
+    const key = c.captain.trim().toLowerCase();
+    const patch: Record<string, unknown> = {};
+    if (!c.phone && phoneByName.has(key)) patch.phone = phoneByName.get(key);
+    if (!c.email && emailByName.has(key)) patch.email = emailByName.get(key);
+    if (Object.keys(patch).length > 0) {
+      await db.update(streetCaptainsTable).set(patch).where(eq(streetCaptainsTable.id, c.id));
+      scUpdated++;
+    }
+  }
+
+  let cpUpdated = 0;
+  const cpRows = await db.select().from(captainProfilesTable);
+  // Also build a phone lookup from street_captains (in case admin entered phone there but commitments has no match).
+  const scPhoneByName = new Map<string, string>();
+  for (const c of scRows) {
+    if (c.captain === "Unassigned") continue;
+    const key = c.captain.trim().toLowerCase();
+    if (c.phone && !scPhoneByName.has(key)) scPhoneByName.set(key, c.phone);
+  }
+  for (const p of cpRows) {
+    if (p.phone) continue;
+    const key = p.name.trim().toLowerCase();
+    const phone = phoneByName.get(key) ?? scPhoneByName.get(key);
+    if (phone) {
+      await db.update(captainProfilesTable).set({ phone }).where(eq(captainProfilesTable.id, p.id));
+      cpUpdated++;
+    }
+  }
+
+  return { captains: scUpdated, profiles: cpUpdated };
 }
 
 export async function seedIfEmpty(): Promise<void> {
@@ -122,8 +226,18 @@ export async function seedIfEmpty(): Promise<void> {
     const splits = await splitCombinedCaptains();
     if (splits > 0) logger.info({ inserted: splits }, "Auto-split combined captains");
 
-    const phones = await backfillCaptainPhones();
-    if (phones > 0) logger.info({ updated: phones }, "Backfilled captain phones from commitments");
+    await applyNameNormalizations();
+
+    const staleRemoved = await mergeAndRemoveStaleProfiles();
+    if (staleRemoved > 0) logger.info({ merged: staleRemoved }, "Merged stale captain_profiles into canonical names");
+
+    const profilesAdded = await syncCaptainProfiles();
+    if (profilesAdded > 0) logger.info({ added: profilesAdded }, "Synced captain_profiles from street_captains");
+
+    const phones = await backfillPhonesEverywhere();
+    if (phones.captains > 0 || phones.profiles > 0) {
+      logger.info(phones, "Backfilled phones into street_captains + captain_profiles");
+    }
   } catch (err) {
     logger.warn({ err }, "Seed skipped — DB may not be ready yet");
   }

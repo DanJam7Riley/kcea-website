@@ -8,8 +8,9 @@ const ADMIN_PASSWORD = () => process.env.ADMIN_PASSWORD ?? "kcea2026";
 const TOKEN_TTL_MS = 24 * 60 * 60 * 1000;
 
 const SEEDED_CAPTAIN_NAMES = [
-  "Carina", "Ingrid", "Priscilla", "Jo-Anne", "Geoff",
-  "Maria D'Alves", "Kerstin", "Paul Arokiam", "Garren (Feroze assist)",
+  "Carina", "Ingrid Bester", "Priscilla", "Jo-Anne", "Geoff",
+  "Maria D'Alves", "Kerstin", "Paul Arokiam", "Garren Pillay",
+  "Irene Goodwin", "Jason van Wyngaard",
 ];
 
 function hashPin(pin: string): string {
