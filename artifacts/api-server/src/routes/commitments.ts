@@ -1,6 +1,7 @@
 import { Router } from "express";
-import { db, commitmentsTable, captainProfilesTable } from "@workspace/db";
-import { eq, desc, sql } from "drizzle-orm";
+import { db, commitmentsTable, captainProfilesTable, streetCaptainsTable } from "@workspace/db";
+import { eq, desc, sql, and } from "drizzle-orm";
+import { getOrCreateSettings } from "../lib/settings";
 import { createHmac, timingSafeEqual } from "node:crypto";
 
 const router = Router();
@@ -53,6 +54,50 @@ router.post("/commitments", async (req, res) => {
       .insert(commitmentsTable)
       .values({ fullName, email, phone, street, houseNumber, commitmentType, imported: false, paymentConfirmed: false })
       .returning();
+
+    // Notification routing decision (per product spec):
+    //   - Primary target = the Active Captain for this street (their phone).
+    //   - Fallback target = admin notifyWhatsapp, but ONLY when no Active Captain is assigned
+    //     (or the assigned captain has no phone on file). Other admin notifications are intentionally
+    //     limited to: new captain applications, incomplete records, and no-captain streets.
+    // Today there is no server-side Twilio send wired up — the captain will see this submission in
+    // their Captain Portal "New Submissions" section on next login. We log the routing decision here
+    // so that adding Twilio later is a one-line drop-in, and so the audit trail is visible now.
+    try {
+      const activeCaptains = await db
+        .select({ captain: streetCaptainsTable.captain, phone: streetCaptainsTable.phone })
+        .from(streetCaptainsTable)
+        .where(and(eq(streetCaptainsTable.street, street), eq(streetCaptainsTable.captainStatus, "Active Captain")));
+      // A street can legitimately have co-captains — notify (log) all of them, not just the first.
+      const reachable = activeCaptains.filter(
+        c => c.phone && c.phone.trim() !== "" && c.phone.trim() !== "-" && c.captain !== "Unassigned",
+      );
+      if (reachable.length > 0) {
+        req.log.info(
+          {
+            commitmentId: created.id,
+            street,
+            target: "captain",
+            captains: reachable.map(c => ({ name: c.captain, phone: c.phone })),
+          },
+          "New commitment — routed to street captain(s)",
+        );
+      } else {
+        const settings = await getOrCreateSettings();
+        req.log.info(
+          {
+            commitmentId: created.id,
+            street,
+            target: "admin",
+            reason: activeCaptains.length === 0 ? "no_active_captain" : "captain_has_no_phone",
+            adminPhone: settings.notifyWhatsapp ?? null,
+          },
+          "New commitment — no captain available, admin notified",
+        );
+      }
+    } catch (notifyErr) {
+      req.log.warn({ err: notifyErr, commitmentId: created.id }, "Notification routing lookup failed (commitment saved OK)");
+    }
 
     res.status(201).json(created);
   } catch (err) {
@@ -153,7 +198,40 @@ router.get("/commitments/incomplete", async (req, res) => {
         missingFields: ["Phone"],
       }));
 
-    res.json([...commitments, ...incompleteProfiles]);
+    // Commitments submitted within the last 30 days on streets with NO Active Captain assigned —
+    // these need admin attention because no captain will see them in their portal.
+    const captainRows = await db
+      .select({ street: streetCaptainsTable.street, captain: streetCaptainsTable.captain, captainStatus: streetCaptainsTable.captainStatus })
+      .from(streetCaptainsTable);
+    const streetsWithActiveCaptain = new Set(
+      captainRows
+        .filter(r => r.captainStatus === "Active Captain" && r.captain && r.captain !== "Unassigned")
+        .map(r => r.street),
+    );
+    // De-dupe: a commitment that's already surfaced via missingFields should NOT be listed a
+    // second time as "no-captain" — the admin sees both flags inside one row instead.
+    const alreadyIncompleteIds = new Set(commitments.map(c => c.id));
+    const thirtyDaysAgo = Date.now() - 30 * 24 * 60 * 60 * 1000;
+    const noCaptainSubmissions = rows
+      .filter(r =>
+        !alreadyIncompleteIds.has(r.id) &&
+        !streetsWithActiveCaptain.has(r.street) &&
+        new Date(r.submittedAt).getTime() > thirtyDaysAgo,
+      )
+      .map(r => ({
+        id: r.id,
+        kind: "no-captain" as const,
+        fullName: r.fullName,
+        email: r.email,
+        phone: r.phone,
+        street: r.street,
+        houseNumber: r.houseNumber,
+        commitmentType: r.commitmentType,
+        submittedAt: r.submittedAt.toISOString(),
+        missingFields: ["No captain assigned"],
+      }));
+
+    res.json([...commitments, ...incompleteProfiles, ...noCaptainSubmissions]);
   } catch (err) {
     req.log.error(err);
     res.status(500).json({ error: "Failed to fetch incomplete records" });

@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import {
   Shield, LogOut, CheckCircle, XCircle, Plus, Save,
-  MessageSquare, Home, ArrowLeft, Lock
+  MessageSquare, Home, ArrowLeft, Lock, Sparkles
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -25,6 +25,16 @@ interface CommittedProperty {
   paymentConfirmed: boolean;
 }
 
+interface NewSubmission {
+  id: number;
+  fullName: string;
+  street: string;
+  houseNumber: string;
+  commitmentType: string;
+  phone: string;
+  submittedAt: string;
+}
+
 interface HouseRecord {
   id: number;
   street: string;
@@ -45,6 +55,15 @@ interface DashboardData {
   committed: CommittedProperty[];
   notCommitted: HouseRecord[];
   notes: NoteRecord[];
+  newSubmissions: NewSubmission[];
+}
+
+function makeWaUrl(phone: string, message: string): string | null {
+  const digits = phone.replace(/[\s()\-+]/g, "");
+  if (!digits || digits.length < 7) return null;
+  const normalized = digits.startsWith("0") ? "27" + digits.slice(1) : digits;
+  if (!/^\d{10,15}$/.test(normalized)) return null;
+  return `https://wa.me/${normalized}?text=${encodeURIComponent(message)}`;
 }
 
 interface PropertyNoteFieldProps {
@@ -372,6 +391,64 @@ export default function CaptainPortal() {
       </header>
 
       <main className="container mx-auto max-w-5xl px-4 py-8 space-y-6">
+
+        {/* New Submissions card — residents who committed since last login */}
+        {dashboard.newSubmissions && dashboard.newSubmissions.length > 0 && (
+          <Card className="bg-card border-primary/40">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base flex items-center gap-2">
+                <Sparkles className="h-5 w-5 text-primary" />
+                New Submissions Since Your Last Login ({dashboard.newSubmissions.length})
+              </CardTitle>
+              <p className="text-xs text-muted-foreground mt-1">
+                These residents have just committed. Send them a quick thank-you WhatsApp to welcome them.
+              </p>
+            </CardHeader>
+            <CardContent className="space-y-2 max-h-[26rem] overflow-y-auto pr-1">
+              {dashboard.newSubmissions.map(s => {
+                const firstName = (s.fullName || "there").split(/\s+/)[0] || "there";
+                const msg = `Hi ${firstName}, thank you for committing to the KCEA enclosure for ${s.street}! I'm your street captain. Please feel free to reach out if you have any questions. - ${dashboard.captainName}`;
+                const waUrl = makeWaUrl(s.phone, msg);
+                return (
+                  <div key={s.id} className="p-3 rounded-lg bg-primary/5 border border-primary/20 flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="font-medium text-sm truncate">{s.fullName}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {s.street} No. {s.houseNumber}
+                        <span className="ml-2 text-[10px] uppercase tracking-wide">
+                          {new Date(s.submittedAt).toLocaleDateString("en-ZA", { day: "2-digit", month: "short" })}
+                        </span>
+                      </p>
+                    </div>
+                    <div className="flex flex-col items-end gap-1 shrink-0">
+                      <Badge
+                        variant="outline"
+                        className={s.commitmentType === "onceoff"
+                          ? "bg-primary/20 text-primary border-primary/20 text-xs"
+                          : "bg-blue-500/20 text-blue-400 border-blue-500/20 text-xs"}
+                      >
+                        {s.commitmentType === "onceoff" ? "Once-off" : "R250/mo"}
+                      </Badge>
+                      {waUrl ? (
+                        <a
+                          href={waUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1 px-2 py-1 rounded text-xs text-green-400 bg-green-500/10 border border-green-500/20 hover:bg-green-500/20 transition-colors whitespace-nowrap"
+                        >
+                          <MessageSquare className="h-3 w-3" />
+                          WhatsApp
+                        </a>
+                      ) : (
+                        <span className="text-[10px] text-muted-foreground italic">No phone</span>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </CardContent>
+          </Card>
+        )}
 
         {/* Progress card */}
         <Card className="bg-card border-border">

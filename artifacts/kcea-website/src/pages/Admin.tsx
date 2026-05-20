@@ -18,7 +18,7 @@ type Tab = typeof TABS[number];
 
 interface IncompleteCommitment {
   id: number;
-  kind?: "commitment" | "profile";
+  kind?: "commitment" | "profile" | "no-captain";
   fullName: string;
   email: string | null;
   phone: string;
@@ -747,15 +747,6 @@ export default function Admin() {
                         </p>
                       </div>
                       <div className="col-span-3 flex items-center justify-end gap-1">
-                        {(() => {
-                          const msg = `Hi ${c.fullName}, thank you for committing to the KCEA enclosure project! Your details have been recorded for ${c.street}, No. ${c.houseNumber}. We will be in touch with payment information soon. KCEA Team.`;
-                          const url = makeResidentWaUrl(c.phone, msg);
-                          return url ? (
-                            <a href={url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 px-2 py-1 rounded text-xs text-green-400 bg-green-500/10 border border-green-500/20 hover:bg-green-500/20 transition-colors whitespace-nowrap" title="Send thank-you WhatsApp to resident">
-                              <MessageSquare className="h-3 w-3" />WhatsApp Resident
-                            </a>
-                          ) : null;
-                        })()}
                         <button
                           onClick={() => confirmPayment.mutate({ id: c.id, paymentConfirmed: !c.paymentConfirmed })}
                           className={`transition-colors p-1 rounded ${c.paymentConfirmed ? "text-green-400 hover:text-muted-foreground" : "text-muted-foreground hover:text-green-400"}`}
@@ -1016,19 +1007,22 @@ export default function Admin() {
                   </div>
                   {incompleteRecords.map(c => {
                     const isProfile = c.kind === "profile";
+                    const isNoCaptain = c.kind === "no-captain";
                     const hasPhone = !!(c.phone && c.phone !== "-");
                     const hasEmail = !!(c.email && c.email !== "imported@kcea.local");
                     const token = c.updateToken ?? "";
-                    const waUrl = !isProfile && hasPhone && token ? makeIncompleteWaUrl(c.phone, c.fullName, c.street, c.id, token) : null;
-                    const mailtoUrl = !isProfile && !hasPhone && hasEmail && token
+                    const waUrl = !isProfile && !isNoCaptain && hasPhone && token ? makeIncompleteWaUrl(c.phone, c.fullName, c.street, c.id, token) : null;
+                    const mailtoUrl = !isProfile && !isNoCaptain && !hasPhone && hasEmail && token
                       ? `mailto:${c.email}?subject=${encodeURIComponent("KCEA — please update your details")}&body=${encodeURIComponent(`Hi ${(c.fullName || "there").split(/\s+/)[0]}, we have your commitment on record${c.street ? ` for ${c.street}` : ""} but are missing some details. Please update your info here: ${makeUpdateLink(c.id, token)}`)}`
                       : null;
+                    const borderColor = isNoCaptain ? "border-red-500/30 hover:border-red-500/40" : "border-amber-500/20 hover:border-amber-500/30";
                     return (
-                      <div key={`${c.kind || "commitment"}-${c.id}`} className="grid grid-cols-12 gap-3 items-center px-3 py-3 rounded-lg bg-background/50 border border-amber-500/20 hover:border-amber-500/30 transition-colors">
+                      <div key={`${c.kind || "commitment"}-${c.id}`} className={`grid grid-cols-12 gap-3 items-center px-3 py-3 rounded-lg bg-background/50 border ${borderColor} transition-colors`}>
                         <div className="col-span-3">
                           <p className="font-medium text-sm">
                             {c.fullName || <span className="italic text-muted-foreground">No name</span>}
                             {isProfile && <Badge className="ml-2 bg-blue-500/15 text-blue-300 border-blue-400/30 text-[10px]" variant="outline">Captain profile</Badge>}
+                            {isNoCaptain && <Badge className="ml-2 bg-red-500/15 text-red-300 border-red-400/30 text-[10px]" variant="outline">No captain</Badge>}
                           </p>
                           <p className="text-xs text-muted-foreground">
                             {isProfile ? `Profile #${c.id}` : `#${c.id} · ${new Date(c.submittedAt).toLocaleDateString("en-ZA", { day: "2-digit", month: "short", year: "numeric" })}`}

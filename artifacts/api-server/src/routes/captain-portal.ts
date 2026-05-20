@@ -82,7 +82,17 @@ router.post("/captain/login", async (req, res) => {
     const token = randomBytes(32).toString("hex");
     const expiresAt = new Date(Date.now() + TOKEN_TTL_MS);
     await db.insert(captainTokensTable).values({ profileId: profile.id, token, expiresAt });
-    await db.update(captainProfilesTable).set({ lastLoginAt: new Date() }).where(eq(captainProfilesTable.id, profile.id));
+
+    // Roll the previousLoginAt snapshot forward ONLY when this looks like a fresh session
+    // (more than 30 minutes since the last login). Otherwise a quick refresh / second device
+    // login would clobber the cutoff and instantly hide every "new" submission.
+    const now = new Date();
+    const SESSION_GAP_MS = 30 * 60 * 1000;
+    const isFreshSession =
+      !profile.lastLoginAt || now.getTime() - new Date(profile.lastLoginAt).getTime() > SESSION_GAP_MS;
+    const patch: { lastLoginAt: Date; previousLoginAt?: Date | null } = { lastLoginAt: now };
+    if (isFreshSession) patch.previousLoginAt = profile.lastLoginAt;
+    await db.update(captainProfilesTable).set(patch).where(eq(captainProfilesTable.id, profile.id));
 
     res.json({ token, captainName: profile.name });
   } catch (err) {
@@ -100,7 +110,7 @@ router.get("/captain/dashboard", async (req, res) => {
 
     const streets = await getStreetsForCaptain(profile.name);
 
-    let committed: { id: number; fullName: string; street: string; houseNumber: string; commitmentType: string; paymentConfirmed: boolean }[] = [];
+    let committed: { id: number; fullName: string; street: string; houseNumber: string; commitmentType: string; paymentConfirmed: boolean; phone: string; submittedAt: Date }[] = [];
     let houses: { id: number; street: string; houseNumber: string }[] = [];
     let notes: { id: number; street: string; houseNumber: string; note: string; updatedAt: Date }[] = [];
 
@@ -113,6 +123,8 @@ router.get("/captain/dashboard", async (req, res) => {
           houseNumber: commitmentsTable.houseNumber,
           commitmentType: commitmentsTable.commitmentType,
           paymentConfirmed: commitmentsTable.paymentConfirmed,
+          phone: commitmentsTable.phone,
+          submittedAt: commitmentsTable.submittedAt,
         })
         .from(commitmentsTable)
         .where(inArray(commitmentsTable.street, streets));
@@ -137,7 +149,14 @@ router.get("/captain/dashboard", async (req, res) => {
     const committedKeys = new Set(committed.map(c => `${c.street}|${c.houseNumber}`));
     const notCommitted = houses.filter(h => !committedKeys.has(`${h.street}|${h.houseNumber}`));
 
-    res.json({ captainName: profile.name, streets, committed, notCommitted, notes });
+    // "New since last login" — uses previousLoginAt (snapshot at login time). On first ever login
+    // we show submissions from the past 7 days as a sensible default rather than the entire history.
+    const cutoff = profile.previousLoginAt ?? new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+    const newSubmissions = committed
+      .filter(c => new Date(c.submittedAt).getTime() > cutoff.getTime())
+      .sort((a, b) => new Date(b.submittedAt).getTime() - new Date(a.submittedAt).getTime());
+
+    res.json({ captainName: profile.name, streets, committed, notCommitted, notes, newSubmissions });
   } catch (err) {
     req.log.error(err);
     res.status(500).json({ error: "Failed to load dashboard" });
