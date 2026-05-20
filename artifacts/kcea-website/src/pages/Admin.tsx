@@ -249,9 +249,31 @@ export default function Admin() {
     }),
     enabled: authed,
   });
-  const adminWhatsapp = siteSettings?.notifyWhatsapp || "0832355052";
+  const storedWhatsapp = siteSettings?.notifyWhatsapp ?? "";
+  const adminWhatsapp = storedWhatsapp || "0832355052";
   const [whatsappEdit, setWhatsappEdit] = useState<string | null>(null);
   const [whatsappSaved, setWhatsappSaved] = useState(false);
+  const [migrateResult, setMigrateResult] = useState<string | null>(null);
+  const runMigrate = useMutation({
+    mutationFn: () =>
+      fetch(`${BASE}/api/admin/migrate`, { method: "POST", headers: authHeaders }).then(async r => {
+        if (!r.ok) throw new Error("Migration failed");
+        return r.json();
+      }),
+    onSuccess: (d: { commitments: { before: number; deleted: number; after: number }; captains: Array<{ street: string; updated: boolean }>; settings: { notifyWhatsappInitialized: boolean } }) => {
+      const capStreets = d.captains.filter(c => c.updated).map(c => c.street).join(", ");
+      setMigrateResult(
+        `Commitments: ${d.commitments.before} → ${d.commitments.after} (deleted ${d.commitments.deleted} placeholders). ` +
+        `Captains updated: ${capStreets || "none"}. ` +
+        (d.settings.notifyWhatsappInitialized ? "WhatsApp number initialized." : "")
+      );
+      qc.invalidateQueries({ queryKey: ["commitments"] });
+      qc.invalidateQueries({ queryKey: ["captains"] });
+      qc.invalidateQueries({ queryKey: ["stats"] });
+      qc.invalidateQueries({ queryKey: ["site-settings"] });
+    },
+    onError: () => setMigrateResult("Migration failed. Check console."),
+  });
   const updateSettings = useMutation({
     mutationFn: (data: { notifyWhatsapp?: string }) =>
       fetch(`${BASE}/api/settings`, {
@@ -1252,7 +1274,7 @@ export default function Admin() {
                   <div className="flex gap-2">
                     <Input
                       id="admin-whatsapp"
-                      value={whatsappEdit ?? adminWhatsapp}
+                      value={whatsappEdit ?? storedWhatsapp}
                       onChange={e => setWhatsappEdit(e.target.value)}
                       placeholder="e.g. 0832355052"
                       className="bg-background border-border"
@@ -1262,7 +1284,7 @@ export default function Admin() {
                     ) : (
                       <Button
                         variant="outline"
-                        disabled={updateSettings.isPending || whatsappEdit === null || whatsappEdit.trim() === adminWhatsapp}
+                        disabled={updateSettings.isPending || whatsappEdit === null || whatsappEdit.trim() === storedWhatsapp}
                         onClick={() => updateSettings.mutate({ notifyWhatsapp: (whatsappEdit ?? "").trim() })}
                         className="gap-1 shrink-0"
                       >
@@ -1270,6 +1292,26 @@ export default function Admin() {
                       </Button>
                     )}
                   </div>
+                </div>
+
+                <div className="pt-4 border-t border-border space-y-2">
+                  <Label className="text-sm">Apply data fixes</Label>
+                  <p className="text-xs text-muted-foreground">
+                    One-time cleanup for this database: deletes placeholder commitments
+                    (name "Imported"/empty, email/phone "Unknown"), updates Nile/Onyx/Panther/Orion/Mildura captains,
+                    and initializes the WhatsApp number if empty. Safe to re-run.
+                  </p>
+                  <Button
+                    variant="outline"
+                    onClick={() => { setMigrateResult(null); runMigrate.mutate(); }}
+                    disabled={runMigrate.isPending}
+                    className="gap-1"
+                  >
+                    {runMigrate.isPending ? "Running…" : "Apply data fixes"}
+                  </Button>
+                  {migrateResult && (
+                    <p className="text-xs text-green-400 pt-1">{migrateResult}</p>
+                  )}
                 </div>
               </CardContent>
             </Card>

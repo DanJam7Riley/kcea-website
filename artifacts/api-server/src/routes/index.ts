@@ -6,12 +6,14 @@ import commitmentsRouter from "./commitments";
 import volunteersRouter from "./volunteers";
 import captainPortalRouter from "./captain-portal";
 import settingsRouter from "./settings";
+import adminMigrateRouter from "./admin-migrate";
 
 const router: IRouter = Router();
 
 router.use(healthRouter);
 router.use(statsRouter);
 router.use(settingsRouter);
+router.use(adminMigrateRouter);
 router.use(captainsRouter);
 router.use(commitmentsRouter);
 router.use(volunteersRouter);
