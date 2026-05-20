@@ -54,6 +54,15 @@ interface ContactedResident {
   contactedAt: string;
 }
 
+interface MissingContact {
+  id: number;
+  fullName: string;
+  street: string;
+  houseNumber: string;
+  missingPhone: boolean;
+  missingEmail: boolean;
+}
+
 interface DashboardData {
   captainName: string;
   streets: string[];
@@ -62,6 +71,9 @@ interface DashboardData {
   notes: NoteRecord[];
   newSubmissions: NewSubmission[];
   contactedResidents: ContactedResident[];
+  targetByStreet: Record<string, number>;
+  targetHouseholds: number;
+  missingContactInfo: MissingContact[];
 }
 
 function makeWaUrl(phone: string, message: string): string | null {
@@ -380,8 +392,12 @@ export default function CaptainPortal() {
     );
   }
 
-  const total = dashboard.committed.length + dashboard.notCommitted.length;
-  const pct = total > 0 ? Math.round((dashboard.committed.length / total) * 100) : 0;
+  // Total = per-street household targets (default 30 each). Falls back to registered houses
+  // if the server didn't supply targets (older clients / new captain with no rows yet).
+  const total = dashboard.targetHouseholds && dashboard.targetHouseholds > 0
+    ? dashboard.targetHouseholds
+    : dashboard.committed.length + dashboard.notCommitted.length;
+  const pct = total > 0 ? Math.min(100, Math.round((dashboard.committed.length / total) * 100)) : 0;
 
   const sortByHouseNum = <T extends { houseNumber: string }>(arr: T[]) =>
     [...arr].sort((a, b) => a.houseNumber.localeCompare(b.houseNumber, undefined, { numeric: true }));
@@ -572,10 +588,29 @@ export default function CaptainPortal() {
             <CardHeader className="pb-3">
               <CardTitle className="text-base flex items-center gap-2">
                 <XCircle className="h-5 w-5 text-red-400" />
-                Follow-up needed ({dashboard.notCommitted.length})
+                Follow-up needed ({dashboard.notCommitted.length + (dashboard.missingContactInfo?.length ?? 0)})
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-2">
+              {dashboard.missingContactInfo && dashboard.missingContactInfo.length > 0 && (
+                <div className="rounded-lg bg-amber-500/5 border border-amber-500/20 p-3 space-y-2">
+                  <p className="text-xs font-medium text-amber-400 flex items-center gap-1">
+                    <XCircle className="h-3 w-3" />
+                    Missing contact info ({dashboard.missingContactInfo.length})
+                  </p>
+                  {dashboard.missingContactInfo.map(m => (
+                    <div key={m.id} className="text-xs">
+                      <span className="font-medium">{m.fullName}</span>
+                      <span className="text-muted-foreground"> — {m.street} No. {m.houseNumber}</span>
+                      <span className="ml-2 text-amber-400/80">
+                        {m.missingPhone && m.missingEmail ? "no phone & email"
+                          : m.missingPhone ? "no phone"
+                          : "no email"}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
               <div className="max-h-[26rem] overflow-y-auto pr-1 space-y-2">
                 {dashboard.notCommitted.length === 0 && (
                   <p className="text-sm text-muted-foreground text-center py-4">

@@ -110,15 +110,18 @@ router.get("/captain/dashboard", async (req, res) => {
 
     const streets = await getStreetsForCaptain(profile.name);
 
-    let committed: { id: number; fullName: string; street: string; houseNumber: string; commitmentType: string; paymentConfirmed: boolean; phone: string; submittedAt: Date }[] = [];
+    let committed: { id: number; fullName: string; email: string; street: string; houseNumber: string; commitmentType: string; paymentConfirmed: boolean; phone: string; submittedAt: Date }[] = [];
     let houses: { id: number; street: string; houseNumber: string }[] = [];
     let notes: { id: number; street: string; houseNumber: string; note: string; updatedAt: Date }[] = [];
+    let targetHouseholds = 0;
+    const targetByStreet: Record<string, number> = {};
 
     if (streets.length > 0) {
       committed = await db
         .select({
           id: commitmentsTable.id,
           fullName: commitmentsTable.fullName,
+          email: commitmentsTable.email,
           street: commitmentsTable.street,
           houseNumber: commitmentsTable.houseNumber,
           commitmentType: commitmentsTable.commitmentType,
@@ -128,6 +131,18 @@ router.get("/captain/dashboard", async (req, res) => {
         })
         .from(commitmentsTable)
         .where(inArray(commitmentsTable.street, streets));
+
+      // Per-street household targets (defaults to 30 — see schema/seed). Multiple captain rows
+      // can exist for the same street (co-captains); use MAX so we don't double-count.
+      const targetRows = await db
+        .select({ street: streetCaptainsTable.street, target: streetCaptainsTable.targetHouseholds })
+        .from(streetCaptainsTable)
+        .where(inArray(streetCaptainsTable.street, streets));
+      for (const s of streets) targetByStreet[s] = 30;
+      for (const r of targetRows) {
+        targetByStreet[r.street] = Math.max(targetByStreet[r.street] ?? 0, r.target);
+      }
+      targetHouseholds = Object.values(targetByStreet).reduce((a, b) => a + b, 0);
 
       houses = await db
         .select()
@@ -163,7 +178,30 @@ router.get("/captain/dashboard", async (req, res) => {
       .where(eq(captainResidentContactsTable.captainProfileId, profile.id));
     const contactedResidents = contacts.map(c => ({ commitmentId: c.commitmentId, contactedAt: c.contactedAt }));
 
-    res.json({ captainName: profile.name, streets, committed, notCommitted, notes, newSubmissions, contactedResidents });
+    // Committed residents with missing/empty phone or email — flagged so the captain can chase them.
+    const missingContactInfo = committed
+      .filter(c => !(c.phone ?? "").trim() || !(c.email ?? "").trim())
+      .map(c => ({
+        id: c.id,
+        fullName: c.fullName,
+        street: c.street,
+        houseNumber: c.houseNumber,
+        missingPhone: !(c.phone ?? "").trim(),
+        missingEmail: !(c.email ?? "").trim(),
+      }));
+
+    res.json({
+      captainName: profile.name,
+      streets,
+      committed,
+      notCommitted,
+      notes,
+      newSubmissions,
+      contactedResidents,
+      targetByStreet,
+      targetHouseholds,
+      missingContactInfo,
+    });
   } catch (err) {
     req.log.error(err);
     res.status(500).json({ error: "Failed to load dashboard" });

@@ -16,6 +16,7 @@ export const streetCaptainsTable = pgTable("street_captains", {
   street: text("street").notNull(),
   captain: text("captain").notNull(),
   forms: integer("forms").notNull().default(0),
+  targetHouseholds: integer("target_households").notNull().default(30),
   status: text("status").notNull(),
   phone: text("phone"),
   email: text("email"),
