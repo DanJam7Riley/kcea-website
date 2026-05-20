@@ -260,11 +260,12 @@ export default function Admin() {
         if (!r.ok) throw new Error("Migration failed");
         return r.json();
       }),
-    onSuccess: (d: { commitments: { before: number; deleted: number; after: number }; captains: Array<{ street: string; updated: boolean }>; settings: { notifyWhatsappInitialized: boolean } }) => {
+    onSuccess: (d: { commitments: { before: number; deleted: number; after: number }; captains: Array<{ street: string; updated: boolean }>; earlsCourtAdded?: boolean; settings: { notifyWhatsappInitialized: boolean } }) => {
       const capStreets = d.captains.filter(c => c.updated).map(c => c.street).join(", ");
       setMigrateResult(
         `Commitments: ${d.commitments.before} → ${d.commitments.after} (deleted ${d.commitments.deleted} placeholders). ` +
         `Captains updated: ${capStreets || "none"}. ` +
+        (d.earlsCourtAdded ? "Earls Court added. " : "") +
         (d.settings.notifyWhatsappInitialized ? "WhatsApp number initialized." : "")
       );
       qc.invalidateQueries({ queryKey: ["commitments"] });

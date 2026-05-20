@@ -60,6 +60,33 @@ const DEFAULT_CAPTAINS: StreetCaptain[] = [
   { id: 17, street: "Milner",       captain: "Unassigned",      forms: 1,  status: "Critical"    },
   { id: 18, street: "Patrol",       captain: "Unassigned",      forms: 1,  status: "Critical"    },
   { id: 19, street: "Mildura",      captain: "Garren / Feroze", forms: 0,  status: "Critical"    },
+  { id: 20, street: "Earls Court",  captain: "Unassigned",      forms: 0,  status: "Critical"    },
+];
+
+// Streets shown in the commitment + captain application forms.
+// "Earls Court" is a complex located on Nile Street, Kensington — tracked as its own area.
+const STREET_OPTIONS: { value: string; label: string }[] = [
+  { value: "Derby",        label: "Derby" },
+  { value: "Earls Court",  label: "Earls Court (complex on Nile St)" },
+  { value: "Ernest",       label: "Ernest" },
+  { value: "Highlands",    label: "Highlands" },
+  { value: "Leicester",    label: "Leicester" },
+  { value: "Mildura",      label: "Mildura" },
+  { value: "Milner",       label: "Milner" },
+  { value: "Nile",         label: "Nile" },
+  { value: "Nottingham",   label: "Nottingham" },
+  { value: "Nymphe",       label: "Nymphe" },
+  { value: "Ocean",        label: "Ocean" },
+  { value: "Onyx",         label: "Onyx" },
+  { value: "Orion",        label: "Orion" },
+  { value: "Orwell",       label: "Orwell" },
+  { value: "Osprey",       label: "Osprey" },
+  { value: "Panther",      label: "Panther" },
+  { value: "Patrol",       label: "Patrol" },
+  { value: "Phoenix",      label: "Phoenix" },
+  { value: "Protea",       label: "Protea" },
+  { value: "Westmoreland", label: "Westmoreland" },
+  { value: "Other",        label: "Other" },
 ];
 
 const faqs = [
@@ -400,8 +427,16 @@ export default function Home() {
                       <div className="grid grid-cols-2 gap-4">
                         <div className="space-y-2">
                           <Label htmlFor="street">Street Name</Label>
-                          <Input id="street" required placeholder="Derby" className="bg-background border-border" data-testid="input-street"
-                            value={formData.street} onChange={e => setFormData(p => ({ ...p, street: e.target.value }))} />
+                          <Select required value={formData.street} onValueChange={v => setFormData(p => ({ ...p, street: v }))}>
+                            <SelectTrigger id="street" className="bg-background border-border" data-testid="select-street">
+                              <SelectValue placeholder="Select street" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {STREET_OPTIONS.map(o => (
+                                <SelectItem key={o.value} value={o.value} data-testid={`select-option-street-${o.value}`}>{o.label}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
                         </div>
                         <div className="space-y-2">
                           <Label htmlFor="houseNumber">House No.</Label>
@@ -577,6 +612,9 @@ export default function Home() {
                   <CardContent className="p-5 flex flex-col h-full justify-between gap-4">
                     <div className="space-y-1">
                       <h4 className="font-bold text-lg">{street.street}</h4>
+                      {street.street === "Earls Court" && (
+                        <p className="text-xs text-muted-foreground/80 italic">Complex on Nile St</p>
+                      )}
                       <p className="text-sm text-muted-foreground flex items-center gap-1">
                         <Users className="h-3 w-3" /> {street.captain}
                       </p>
@@ -638,14 +676,16 @@ export default function Home() {
                     </div>
                     <div className="space-y-2">
                       <Label htmlFor="cap-street">Street You Want to Captain</Label>
-                      <Input
-                        id="cap-street"
-                        required
-                        placeholder="Derby Road"
-                        className="bg-background border-border"
-                        value={captainAppForm.street}
-                        onChange={e => setCaptainAppForm(p => ({ ...p, street: e.target.value }))}
-                      />
+                      <Select required value={captainAppForm.street} onValueChange={v => setCaptainAppForm(p => ({ ...p, street: v }))}>
+                        <SelectTrigger id="cap-street" className="bg-background border-border" data-testid="select-cap-street">
+                          <SelectValue placeholder="Select street" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {STREET_OPTIONS.map(o => (
+                            <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                     </div>
                     <div className="space-y-2">
                       <Label htmlFor="cap-phone">Cell Number</Label>

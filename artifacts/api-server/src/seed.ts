@@ -22,6 +22,8 @@ const SEED_CAPTAINS = [
   { street: "Milner",       captain: "Unassigned",       forms: 1,  status: "Critical"    },
   { street: "Patrol",       captain: "Unassigned",       forms: 1,  status: "Critical"    },
   { street: "Mildura",      captain: "Garren / Feroze",  forms: 0,  status: "Critical"    },
+  // Earls Court is a complex located on Nile Street, Kensington — tracked separately.
+  { street: "Earls Court",  captain: "Unassigned",       forms: 0,  status: "Critical"    },
 ];
 
 export async function seedIfEmpty(): Promise<void> {

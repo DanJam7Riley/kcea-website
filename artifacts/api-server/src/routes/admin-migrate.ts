@@ -57,6 +57,23 @@ router.post("/admin/migrate", async (req, res) => {
       captainResults.push({ street: c.street, updated: updated.length > 0 });
     }
 
+    // Ensure "Earls Court" exists as its own row (complex on Nile St, Kensington).
+    const existingEarls = await db
+      .select({ id: streetCaptainsTable.id })
+      .from(streetCaptainsTable)
+      .where(eq(streetCaptainsTable.street, "Earls Court"));
+    let earlsCourtAdded = false;
+    if (existingEarls.length === 0) {
+      await db.insert(streetCaptainsTable).values({
+        street: "Earls Court",
+        captain: "Unassigned",
+        forms: 0,
+        status: "Critical",
+        captainStatus: "Active Captain",
+      });
+      earlsCourtAdded = true;
+    }
+
     const settings = await getOrCreateSettings();
     let settingsUpdated = false;
     if (!settings.notifyWhatsapp || settings.notifyWhatsapp.trim() === "") {
@@ -75,6 +92,7 @@ router.post("/admin/migrate", async (req, res) => {
         after: afterCount,
       },
       captains: captainResults,
+      earlsCourtAdded,
       settings: { notifyWhatsappInitialized: settingsUpdated },
     });
   } catch (err) {
