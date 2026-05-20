@@ -391,6 +391,74 @@ router.get("/commitments", async (req, res) => {
   }
 });
 
+// Edit a commitment — admin only. Accepts a partial body of editable fields.
+router.put("/commitments/:id", async (req, res) => {
+  const password = req.headers["x-admin-password"] as string;
+  const adminPassword = process.env.ADMIN_PASSWORD ?? "kcea2026";
+  if (!password || password !== adminPassword) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+
+  const id = parseInt(req.params.id, 10);
+  if (isNaN(id)) {
+    res.status(400).json({ error: "Invalid id" });
+    return;
+  }
+
+  const body = req.body as Record<string, unknown>;
+  const patch: Record<string, unknown> = {};
+  const strField = (k: string, required = false): string | null | undefined => {
+    if (!(k in body)) return undefined;
+    const v = body[k];
+    if (v === null || v === "") return required ? null : "";
+    return typeof v === "string" ? v.trim() : String(v);
+  };
+
+  const fullName = strField("fullName");
+  if (fullName !== undefined) {
+    if (!fullName) { res.status(400).json({ error: "fullName cannot be empty" }); return; }
+    patch.fullName = fullName;
+  }
+  const street = strField("street");
+  if (street !== undefined) {
+    if (!street) { res.status(400).json({ error: "street cannot be empty" }); return; }
+    patch.street = street;
+  }
+  for (const k of ["email", "phone", "houseNumber", "commitmentType"]) {
+    const v = strField(k);
+    if (v !== undefined) patch[k] = v;
+  }
+  if (typeof body.imported === "boolean") patch.imported = body.imported;
+  if (typeof body.paymentConfirmed === "boolean") patch.paymentConfirmed = body.paymentConfirmed;
+  if (typeof body.submittedAt === "string" && body.submittedAt) {
+    const d = new Date(body.submittedAt);
+    if (isNaN(d.getTime())) { res.status(400).json({ error: "Invalid submittedAt" }); return; }
+    patch.submittedAt = d;
+  }
+
+  if (Object.keys(patch).length === 0) {
+    res.status(400).json({ error: "No editable fields provided" });
+    return;
+  }
+
+  try {
+    const [updated] = await db
+      .update(commitmentsTable)
+      .set(patch)
+      .where(eq(commitmentsTable.id, id))
+      .returning();
+    if (!updated) {
+      res.status(404).json({ error: "Not found" });
+      return;
+    }
+    res.json(updated);
+  } catch (err) {
+    req.log.error(err);
+    res.status(500).json({ error: "Failed to update commitment" });
+  }
+});
+
 // Toggle payment confirmed — admin only
 router.put("/commitments/:id/confirm", async (req, res) => {
   const password = req.headers["x-admin-password"] as string;

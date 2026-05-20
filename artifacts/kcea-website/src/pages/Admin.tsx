@@ -1,7 +1,7 @@
 import { useState, useRef, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
-  Shield, Save, LogIn, AlertTriangle, CheckCircle, Check, Key,
+  Shield, Save, LogIn, AlertTriangle, CheckCircle, Check, Key, Pencil,
   Trash2, Download, Upload, Users, ClipboardList, BarChart3, Search, MessageSquare, RefreshCw, Phone, ExternalLink, Settings as SettingsIcon
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 
@@ -152,6 +153,48 @@ export default function Admin() {
   const [showAddProfile, setShowAddProfile] = useState(false);
   const [setPinLoading, setSetPinLoading] = useState<Set<number>>(new Set());
   const [setPinResult, setSetPinResult] = useState<Record<number, { pin: string; sent: boolean }>>({});
+  const [editingCommitment, setEditingCommitment] = useState<Commitment | null>(null);
+  const [editForm, setEditForm] = useState<Partial<Commitment>>({});
+  const [editError, setEditError] = useState("");
+  const [editSavedId, setEditSavedId] = useState<number | null>(null);
+
+  function openEditCommitment(c: Commitment) {
+    setEditingCommitment(c);
+    setEditForm({
+      fullName: c.fullName,
+      street: c.street,
+      houseNumber: c.houseNumber,
+      email: c.email,
+      phone: c.phone,
+      commitmentType: c.commitmentType,
+      submittedAt: c.submittedAt,
+      imported: c.imported,
+      paymentConfirmed: c.paymentConfirmed,
+    });
+    setEditError("");
+  }
+
+  function saveEditCommitment() {
+    if (!editingCommitment) return;
+    const name = (editForm.fullName ?? "").trim();
+    const street = (editForm.street ?? "").trim();
+    if (!name) { setEditError("Name is required."); return; }
+    if (!street) { setEditError("Street is required."); return; }
+    const id = editingCommitment.id;
+    // Convert the datetime-local string back to an ISO timestamp the server can parse.
+    const submitted = editForm.submittedAt ? new Date(editForm.submittedAt).toISOString() : undefined;
+    updateCommitment.mutate(
+      { id, patch: { ...editForm, fullName: name, street, ...(submitted ? { submittedAt: submitted } : {}) } },
+      {
+        onSuccess: () => {
+          setEditingCommitment(null);
+          setEditSavedId(id);
+          setTimeout(() => setEditSavedId(prev => (prev === id ? null : prev)), 3000);
+        },
+        onError: (err: unknown) => setEditError(err instanceof Error ? err.message : "Update failed"),
+      },
+    );
+  }
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const qc = useQueryClient();
@@ -225,6 +268,20 @@ export default function Admin() {
       fetch(`${BASE}/api/commitments/${id}`, { method: "DELETE", headers: authHeaders })
         .then(async r => { if (!r.ok) throw new Error(await r.text()); return r.json(); }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["commitments"] }),
+  });
+
+  const updateCommitment = useMutation({
+    mutationFn: ({ id, patch }: { id: number; patch: Partial<Commitment> }) =>
+      fetch(`${BASE}/api/commitments/${id}`, {
+        method: "PUT",
+        headers: { ...authHeaders, "Content-Type": "application/json" },
+        body: JSON.stringify(patch),
+      }).then(async r => { if (!r.ok) throw new Error((await r.json().catch(() => ({ error: "Update failed" }))).error ?? "Update failed"); return r.json(); }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["commitments"] });
+      qc.invalidateQueries({ queryKey: ["stats"] });
+      qc.invalidateQueries({ queryKey: ["captains"] });
+    },
   });
 
   const markWelcomed = useMutation({
@@ -756,12 +813,23 @@ export default function Admin() {
                         </p>
                       </div>
                       <div className="col-span-3 flex items-center justify-end gap-1">
+                        {editSavedId === c.id && (
+                          <span className="text-xs text-green-400 flex items-center gap-1 mr-1"><CheckCircle className="h-3.5 w-3.5" /> Saved</span>
+                        )}
                         <button
                           onClick={() => confirmPayment.mutate({ id: c.id, paymentConfirmed: !c.paymentConfirmed })}
                           className={`transition-colors p-1 rounded ${c.paymentConfirmed ? "text-green-400 hover:text-muted-foreground" : "text-muted-foreground hover:text-green-400"}`}
                           title={c.paymentConfirmed ? "Mark payment unconfirmed" : "Mark payment confirmed"}
                         >
                           <Check className="h-4 w-4" />
+                        </button>
+                        <button
+                          onClick={() => openEditCommitment(c)}
+                          className="text-muted-foreground hover:text-primary transition-colors p-1 rounded"
+                          title="Edit submission"
+                          data-testid={`btn-edit-commitment-${c.id}`}
+                        >
+                          <Pencil className="h-4 w-4" />
                         </button>
                         <button
                           onClick={() => {
@@ -1425,6 +1493,130 @@ export default function Admin() {
         )}
 
       </main>
+
+      <Dialog open={!!editingCommitment} onOpenChange={(o) => { if (!o) setEditingCommitment(null); }}>
+        <DialogContent className="bg-card border-border max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Edit Submission {editingCommitment ? `#${editingCommitment.id}` : ""}</DialogTitle>
+          </DialogHeader>
+          {editingCommitment && (
+            <div className="space-y-3">
+              <div className="grid grid-cols-2 gap-3">
+                <div className="col-span-2 space-y-1">
+                  <Label htmlFor="edit-name">Full name *</Label>
+                  <Input
+                    id="edit-name"
+                    value={editForm.fullName ?? ""}
+                    onChange={e => setEditForm(f => ({ ...f, fullName: e.target.value }))}
+                    className="bg-background border-border"
+                    data-testid="input-edit-name"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label htmlFor="edit-street">Street *</Label>
+                  <Input
+                    id="edit-street"
+                    value={editForm.street ?? ""}
+                    onChange={e => setEditForm(f => ({ ...f, street: e.target.value }))}
+                    className="bg-background border-border"
+                    data-testid="input-edit-street"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label htmlFor="edit-house">House number</Label>
+                  <Input
+                    id="edit-house"
+                    value={editForm.houseNumber ?? ""}
+                    onChange={e => setEditForm(f => ({ ...f, houseNumber: e.target.value }))}
+                    className="bg-background border-border"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label htmlFor="edit-email">Email</Label>
+                  <Input
+                    id="edit-email"
+                    type="email"
+                    value={editForm.email ?? ""}
+                    onChange={e => setEditForm(f => ({ ...f, email: e.target.value }))}
+                    className="bg-background border-border"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label htmlFor="edit-phone">Phone / contact</Label>
+                  <Input
+                    id="edit-phone"
+                    value={editForm.phone ?? ""}
+                    onChange={e => setEditForm(f => ({ ...f, phone: e.target.value }))}
+                    className="bg-background border-border"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label htmlFor="edit-type">Payment type</Label>
+                  <select
+                    id="edit-type"
+                    value={editForm.commitmentType ?? "monthly"}
+                    onChange={e => setEditForm(f => ({ ...f, commitmentType: e.target.value }))}
+                    className="w-full h-10 rounded-md bg-background border border-border px-3 text-sm"
+                  >
+                    <option value="monthly">Monthly (R250/mo)</option>
+                    <option value="onceoff">Once-off (R3,000)</option>
+                  </select>
+                </div>
+                <div className="space-y-1">
+                  <Label htmlFor="edit-date">Date</Label>
+                  <Input
+                    id="edit-date"
+                    type="datetime-local"
+                    value={editForm.submittedAt ? new Date(editForm.submittedAt).toISOString().slice(0, 16) : ""}
+                    onChange={e => setEditForm(f => ({ ...f, submittedAt: e.target.value }))}
+                    className="bg-background border-border"
+                  />
+                </div>
+                <div className="col-span-2 space-y-1">
+                  <Label>Status</Label>
+                  <div className="flex flex-wrap gap-4 pt-1">
+                    <label className="flex items-center gap-2 text-sm">
+                      <input
+                        type="checkbox"
+                        checked={!!editForm.imported}
+                        onChange={e => setEditForm(f => ({ ...f, imported: e.target.checked }))}
+                      />
+                      Imported
+                    </label>
+                    <label className="flex items-center gap-2 text-sm">
+                      <input
+                        type="checkbox"
+                        checked={!!editForm.paymentConfirmed}
+                        onChange={e => setEditForm(f => ({ ...f, paymentConfirmed: e.target.checked }))}
+                      />
+                      Payment confirmed (verified)
+                    </label>
+                  </div>
+                </div>
+              </div>
+              {editError && (
+                <div className="flex items-center gap-2 text-sm text-red-400 bg-red-500/10 border border-red-500/20 rounded p-2">
+                  <AlertTriangle className="h-4 w-4 shrink-0" /> {editError}
+                </div>
+              )}
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditingCommitment(null)} disabled={updateCommitment.isPending}>
+              Cancel
+            </Button>
+            <Button
+              onClick={saveEditCommitment}
+              disabled={updateCommitment.isPending}
+              className="bg-primary text-primary-foreground hover:bg-primary/90 gap-2"
+              data-testid="btn-save-edit-commitment"
+            >
+              <Save className="h-4 w-4" />
+              {updateCommitment.isPending ? "Saving…" : "Save changes"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
