@@ -281,6 +281,56 @@ async function backfillPhonesEverywhere(): Promise<PhoneBackfillReport> {
   return report;
 }
 
+/** Idempotent corrections for known bad data. Runs every boot.
+ *  - Jason van Wyngaard's number was captured as 0523732412 (typo); correct value is 0823732412.
+ *  - Paul Arokiam on Panther erroneously inherited Jason's phone via the small-street fallback;
+ *    blank it so the admin can enter Paul's real number. (Stable: rerun is a no-op once Paul has
+ *    either no phone or a different phone from Jason.) */
+async function correctKnownBadPhones(): Promise<{ jasonFixed: number; paulBlanked: number }> {
+  const WRONG = "0523732412";
+  const CORRECT = "0823732412";
+  let jasonFixed = 0;
+  let paulBlanked = 0;
+
+  // 1) Fix Jason wherever the wrong number still exists.
+  const cFix = await db.update(commitmentsTable)
+    .set({ phone: CORRECT })
+    .where(and(eq(commitmentsTable.phone, WRONG), sql`lower(${commitmentsTable.fullName}) like '%jason%'`))
+    .returning({ id: commitmentsTable.id });
+  jasonFixed += cFix.length;
+
+  const pFix = await db.update(captainProfilesTable)
+    .set({ phone: CORRECT })
+    .where(and(eq(captainProfilesTable.phone, WRONG), sql`lower(${captainProfilesTable.name}) like '%jason%'`))
+    .returning({ id: captainProfilesTable.id });
+  jasonFixed += pFix.length;
+
+  const sFix = await db.update(streetCaptainsTable)
+    .set({ phone: CORRECT })
+    .where(and(eq(streetCaptainsTable.phone, WRONG), sql`lower(${streetCaptainsTable.captain}) like '%jason%'`))
+    .returning({ id: streetCaptainsTable.id });
+  jasonFixed += sFix.length;
+
+  // 2) Blank Paul Arokiam's phone IF it equals either the old wrong value or the (now correct) Jason number.
+  //    This counters the small-street fallback that copies Jason's commitment phone to Paul on Panther.
+  const paulBadValues = [WRONG, CORRECT];
+  for (const v of paulBadValues) {
+    const pp = await db.update(captainProfilesTable)
+      .set({ phone: null })
+      .where(and(eq(captainProfilesTable.phone, v), sql`lower(${captainProfilesTable.name}) like '%paul arokiam%'`))
+      .returning({ id: captainProfilesTable.id });
+    paulBlanked += pp.length;
+
+    const ps = await db.update(streetCaptainsTable)
+      .set({ phone: null })
+      .where(and(eq(streetCaptainsTable.phone, v), sql`lower(${streetCaptainsTable.captain}) like '%paul arokiam%'`))
+      .returning({ id: streetCaptainsTable.id });
+    paulBlanked += ps.length;
+  }
+
+  return { jasonFixed, paulBlanked };
+}
+
 export async function seedIfEmpty(): Promise<void> {
   try {
     await ensureSchema();
@@ -332,6 +382,12 @@ export async function seedIfEmpty(): Promise<void> {
     }
     for (const a of phones.ambiguous) {
       logger.info(a, "phone match ambiguous — skipped");
+    }
+
+    // Run AFTER backfill so this overrides any small-street re-fill of Paul's phone.
+    const corrections = await correctKnownBadPhones();
+    if (corrections.jasonFixed > 0 || corrections.paulBlanked > 0) {
+      logger.info(corrections, "Applied known-bad-phone corrections (Jason fix + Paul blank)");
     }
   } catch (err) {
     logger.warn({ err }, "Seed skipped — DB may not be ready yet");
