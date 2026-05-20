@@ -31,6 +31,8 @@ interface StreetCaptain {
   captain: string;
   forms: number;
   status: string;
+  targetHouseholds?: number;
+  committedHouseholds?: number;
 }
 
 const DEFAULT_STATS: SiteStats = {
@@ -154,6 +156,20 @@ export default function Home() {
     queryFn: () => fetch(`${BASE}/api/captains`).then(r => r.json()),
     staleTime: 30_000,
   });
+
+  // Per-street committed counts and totals derived from /api/captains (one row per street).
+  // Co-captain streets appear as duplicate rows, so we de-dupe on street + take the MAX target.
+  const streetCommittedCounts: Record<string, number> = {};
+  const streetTargets: Record<string, number> = {};
+  for (const c of captains) {
+    streetCommittedCounts[c.street] = c.committedHouseholds ?? 0;
+    streetTargets[c.street] = Math.max(streetTargets[c.street] ?? 0, c.targetHouseholds ?? 30);
+  }
+  const totalCommittedHouseholds = Object.values(streetCommittedCounts).reduce((a, b) => a + b, 0);
+  const totalTargetHouseholds = Object.values(streetTargets).reduce((a, b) => a + b, 0);
+  const overallPct = totalTargetHouseholds > 0
+    ? Math.min(100, Math.round((totalCommittedHouseholds / totalTargetHouseholds) * 100))
+    : 0;
 
   const handleFormSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -288,7 +304,7 @@ export default function Home() {
             </div>
             <div className="flex items-center gap-8 pt-8 border-t border-border">
               <div>
-                <p className="text-3xl font-bold text-foreground">{stats.committedHouseholds}</p>
+                <p className="text-3xl font-bold text-foreground">{totalCommittedHouseholds}</p>
                 <p className="text-sm text-muted-foreground">Households</p>
               </div>
               <div>
@@ -331,15 +347,16 @@ export default function Home() {
         <section id="progress" className="space-y-12">
           <div className="text-center space-y-4 max-w-2xl mx-auto">
             <h2 className="text-3xl md:text-4xl font-bold">Project Progress</h2>
-            <p className="text-muted-foreground">We need approximately {stats.targetHouseholds}+ households to fully fund Phase 1 and the infrastructure. Every commitment brings us closer.</p>
+            <p className="text-muted-foreground">We need approximately {totalTargetHouseholds}+ households to fully fund Phase 1 and the infrastructure. Every commitment brings us closer.</p>
           </div>
 
           <div className="grid md:grid-cols-3 gap-6">
             <Card className="bg-card border-card-border">
               <CardContent className="p-6 flex flex-col items-center text-center space-y-2">
                 <Users className="h-8 w-8 text-primary mb-2" />
-                <h4 className="text-3xl font-bold">{stats.committedHouseholds}</h4>
-                <p className="text-sm text-muted-foreground">Committed Households</p>
+                <h4 className="text-3xl font-bold">{totalCommittedHouseholds}<span className="text-base text-muted-foreground font-normal"> / {totalTargetHouseholds}</span></h4>
+                <p className="text-sm text-muted-foreground">Committed Households ({overallPct}%)</p>
+                <Progress value={overallPct} className="h-1.5 w-full mt-1" />
               </CardContent>
             </Card>
             <Card className="bg-card border-card-border relative overflow-hidden">
@@ -400,7 +417,7 @@ export default function Home() {
         <section id="commit" className="space-y-12">
           <div className="text-center space-y-4 max-w-2xl mx-auto">
             <h2 className="text-3xl md:text-4xl font-bold">Make Your Commitment</h2>
-            <p className="text-muted-foreground">Join {stats.committedHouseholds} of your neighbours. We offer both monthly and once-off contribution options.</p>
+            <p className="text-muted-foreground">Join {totalCommittedHouseholds} of your neighbours. We offer both monthly and once-off contribution options.</p>
           </div>
 
           <div className="grid lg:grid-cols-5 gap-8">
@@ -619,11 +636,23 @@ export default function Home() {
                         <Users className="h-3 w-3" /> {street.captain}
                       </p>
                     </div>
-                    <div className="flex items-center justify-between mt-auto">
-                      <span className="text-sm font-medium">{street.forms} forms</span>
-                      <Badge className={getStatusColor(street.status)} variant="secondary" data-testid={`badge-status-${street.street}`}>
-                        {street.status}
-                      </Badge>
+                    <div className="space-y-2 mt-auto">
+                      {(() => {
+                        const target = street.targetHouseholds ?? 30;
+                        const committed = streetCommittedCounts[street.street] ?? 0;
+                        const pct = target > 0 ? Math.min(100, Math.round((committed / target) * 100)) : 0;
+                        return (
+                          <>
+                            <div className="flex items-center justify-between">
+                              <span className="text-sm font-medium">{committed} of {target} households</span>
+                              <Badge className={getStatusColor(street.status)} variant="secondary" data-testid={`badge-status-${street.street}`}>
+                                {street.status}
+                              </Badge>
+                            </div>
+                            <Progress value={pct} className="h-1.5" />
+                          </>
+                        );
+                      })()}
                     </div>
                   </CardContent>
                 </Card>

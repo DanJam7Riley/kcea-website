@@ -1,6 +1,6 @@
 import { Router } from "express";
-import { db, streetCaptainsTable, captainProfilesTable } from "@workspace/db";
-import { eq } from "drizzle-orm";
+import { db, streetCaptainsTable, captainProfilesTable, commitmentsTable } from "@workspace/db";
+import { eq, sql } from "drizzle-orm";
 
 const router = Router();
 
@@ -37,6 +37,17 @@ function isAdmin(req: import("express").Request) {
 router.get("/captains", async (req, res) => {
   try {
     const all = await getOrSeedCaptains();
+
+    // Per-street committed counts (only the number — never PII) so the public homepage
+    // can render real "X of Y households" progress for each street.
+    const counts = await db
+      .select({ street: commitmentsTable.street, n: sql<number>`count(*)::int` })
+      .from(commitmentsTable)
+      .groupBy(commitmentsTable.street);
+    const committedByStreet = new Map<string, number>();
+    for (const r of counts) committedByStreet.set(r.street, Number(r.n));
+    const withCounts = all.map(c => ({ ...c, committedHouseholds: committedByStreet.get(c.street) ?? 0 }));
+
     if (isAdmin(req)) {
       // Enrich each captain with their PIN (from captain_profiles, matched by name) so the admin
       // welcome WhatsApp button can include it. PIN is only ever exposed to admin-authenticated requests.
@@ -45,13 +56,13 @@ router.get("/captains", async (req, res) => {
         .from(captainProfilesTable);
       const pinByName = new Map<string, string | null>();
       for (const p of profiles) pinByName.set(p.name.trim().toLowerCase(), p.pin);
-      const enriched = all.map(c => ({
+      const enriched = withCounts.map(c => ({
         ...c,
         pin: pinByName.get(c.captain.trim().toLowerCase()) ?? null,
       }));
       res.json(enriched);
     } else {
-      res.json(all.filter(c => c.captainStatus === "Active Captain"));
+      res.json(withCounts.filter(c => c.captainStatus === "Active Captain"));
     }
   } catch (err) {
     req.log.error(err);
@@ -135,10 +146,11 @@ router.put("/captains/:id", async (req, res) => {
   }
 
   const body = req.body as Record<string, unknown>;
-  const patch: { captain?: string; forms?: number; status?: string; captainStatus?: string; phone?: string | null; email?: string | null } = {};
+  const patch: { captain?: string; forms?: number; targetHouseholds?: number; status?: string; captainStatus?: string; phone?: string | null; email?: string | null } = {};
 
   if (typeof body.captain === "string" && body.captain.trim()) patch.captain = body.captain.trim();
   if (typeof body.forms === "number") patch.forms = Math.max(0, Math.floor(body.forms));
+  if (typeof body.targetHouseholds === "number") patch.targetHouseholds = Math.max(0, Math.floor(body.targetHouseholds));
   if (typeof body.status === "string" && body.status.trim()) patch.status = body.status.trim();
   if (body.captainStatus === "Active Captain" || body.captainStatus === "Pending / New Volunteer") {
     patch.captainStatus = body.captainStatus;

@@ -67,6 +67,7 @@ interface StreetCaptain {
   street: string;
   captain: string;
   forms: number;
+  targetHouseholds?: number;
   status: string;
   phone: string | null;
   email: string | null;
@@ -868,8 +869,9 @@ export default function Admin() {
                     <div className="col-span-2">Street</div>
                     <div className="col-span-2">Captain</div>
                     <div className="col-span-2">Phone</div>
+                    <div className="col-span-1">Target</div>
                     <div className="col-span-1">Activity</div>
-                    <div className="col-span-3">Status</div>
+                    <div className="col-span-2">Status</div>
                     <div className="col-span-2"></div>
                   </div>
                   {captains.map(c => {
@@ -909,6 +911,17 @@ export default function Admin() {
                           />
                         </div>
                         <div className="col-span-1">
+                          <Input
+                            type="number"
+                            min={0}
+                            defaultValue={c.targetHouseholds ?? 30}
+                            key={`target-${c.id}-${c.targetHouseholds ?? 30}`}
+                            onChange={e => handleCaptainChange(c.id, "targetHouseholds", parseInt(e.target.value, 10) || 0)}
+                            className="bg-card border-border text-sm h-8 text-center"
+                            title="Target households for this street"
+                          />
+                        </div>
+                        <div className="col-span-1">
                           <select
                             defaultValue={c.status}
                             key={`status-${c.id}-${c.status}`}
@@ -920,7 +933,7 @@ export default function Admin() {
                             ))}
                           </select>
                         </div>
-                        <div className="col-span-3 flex flex-col items-start gap-1.5 pt-0.5">
+                        <div className="col-span-2 flex flex-col items-start gap-1.5 pt-0.5">
                           <button
                             onClick={() => toggleCaptainStatus.mutate({
                               id: c.id,

@@ -119,6 +119,22 @@ async function ensureJanineRileyCommitment(): Promise<void> {
   logger.info({ email, street }, "Inserted missing Janine Riley commitment");
 }
 
+/** Seed real household targets per street. Only updates rows still at default (30) so admin edits are preserved. */
+const STREET_TARGET_DEFAULTS: Record<string, number> = {
+  Derby: 60, Orion: 40, Protea: 40, Osprey: 35, Onyx: 35, Nile: 35,
+  Ocean: 30, Nymphe: 30, Westmoreland: 30,
+  Highlands: 25, Leicester: 25, Panther: 25, Nottingham: 25, Phoenix: 25, Orwell: 25,
+  Mildura: 20, Ernest: 20, Milner: 20, Patrol: 20,
+};
+async function ensureStreetTargets(): Promise<void> {
+  for (const [street, target] of Object.entries(STREET_TARGET_DEFAULTS)) {
+    await db
+      .update(streetCaptainsTable)
+      .set({ targetHouseholds: target })
+      .where(and(eq(streetCaptainsTable.street, street), eq(streetCaptainsTable.targetHouseholds, 30)));
+  }
+}
+
 /** Apply canonical name renames + remove non-captain assist rows. Idempotent. */
 async function applyNameNormalizations(): Promise<void> {
   for (const n of NAME_NORMALIZATIONS) {
@@ -424,6 +440,9 @@ export async function seedIfEmpty(): Promise<void> {
 
     // Ensure Janine Riley's commitment for Nile Street is on the roster (idempotent).
     try { await ensureJanineRileyCommitment(); } catch (err) { logger.warn({ err }, "Janine commitment ensure failed"); }
+
+    // Seed per-street household targets (only if still at the prior default of 30 — never overwrites admin edits).
+    try { await ensureStreetTargets(); } catch (err) { logger.warn({ err }, "Street target seeding failed"); }
 
     // Run AFTER backfill so this overrides any small-street re-fill of Paul's phone.
     const corrections = await correctKnownBadPhones();
