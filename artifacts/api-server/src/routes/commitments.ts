@@ -1,8 +1,37 @@
 import { Router } from "express";
-import { db, commitmentsTable } from "@workspace/db";
+import { db, commitmentsTable, captainProfilesTable } from "@workspace/db";
 import { eq, desc, sql } from "drizzle-orm";
+import { createHmac, timingSafeEqual } from "node:crypto";
 
 const router = Router();
+
+const isMissingPhone = (p: string | null | undefined) => !p || p.trim() === "" || p.trim() === "-";
+const isMissingEmail = (e: string | null | undefined) => !e || e.trim() === "" || e.toLowerCase() === "imported@kcea.local";
+const isMissingName = (n: string | null | undefined) => !n || n.trim() === "";
+
+function missingForCommitment(r: { fullName: string; email: string; phone: string }): string[] {
+  const m: string[] = [];
+  if (isMissingName(r.fullName)) m.push("Name");
+  if (isMissingPhone(r.phone)) m.push("Phone");
+  if (isMissingEmail(r.email)) m.push("Email");
+  return m;
+}
+
+/** Per-record HMAC token so the public /update link cannot be enumerated by guessing IDs. */
+function makeUpdateToken(id: number): string {
+  const secret = process.env.SESSION_SECRET ?? "kcea-fallback-secret";
+  return createHmac("sha256", secret).update(`commitment:${id}`).digest("hex").slice(0, 24);
+}
+function verifyUpdateToken(id: number, token: string | undefined): boolean {
+  if (!token) return false;
+  const expected = makeUpdateToken(id);
+  if (token.length !== expected.length) return false;
+  try {
+    return timingSafeEqual(Buffer.from(expected), Buffer.from(token));
+  } catch {
+    return false;
+  }
+}
 
 router.post("/commitments", async (req, res) => {
   const body = req.body as Record<string, unknown>;
@@ -98,25 +127,102 @@ router.get("/commitments/incomplete", async (req, res) => {
     return;
   }
   try {
-    const rows = await db
-      .select()
-      .from(commitmentsTable)
-      .orderBy(desc(commitmentsTable.submittedAt));
-
-    const incomplete = rows
-      .map(r => {
-        const missing: string[] = [];
-        if (!r.fullName || r.fullName.trim() === "") missing.push("Name");
-        if (!r.phone || r.phone.trim() === "" || r.phone.trim() === "-") missing.push("Phone");
-        if (!r.email || r.email.trim() === "" || r.email.toLowerCase() === "imported@kcea.local") missing.push("Email");
-        return { ...r, missingFields: missing };
-      })
+    const rows = await db.select().from(commitmentsTable).orderBy(desc(commitmentsTable.submittedAt));
+    const commitments = rows
+      .map(r => ({
+        ...r,
+        kind: "commitment" as const,
+        missingFields: missingForCommitment(r),
+        updateToken: makeUpdateToken(r.id),
+      }))
       .filter(r => r.missingFields.length > 0);
 
-    res.json(incomplete);
+    const profiles = await db.select().from(captainProfilesTable);
+    const incompleteProfiles = profiles
+      .filter(p => isMissingPhone(p.phone))
+      .map(p => ({
+        id: p.id,
+        kind: "profile" as const,
+        fullName: p.name,
+        email: null as string | null,
+        phone: p.phone,
+        street: "",
+        houseNumber: "",
+        commitmentType: "",
+        submittedAt: new Date().toISOString(),
+        missingFields: ["Phone"],
+      }));
+
+    res.json([...commitments, ...incompleteProfiles]);
   } catch (err) {
     req.log.error(err);
     res.status(500).json({ error: "Failed to fetch incomplete records" });
+  }
+});
+
+// PUBLIC: fetch a commitment by id+token so the resident can see what's missing and pre-fill the form.
+// Requires a valid HMAC token (issued by admin link); rejects complete records to limit data exposure.
+router.get("/commitments/:id/public", async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const token = typeof req.query.t === "string" ? req.query.t : undefined;
+  if (isNaN(id)) { res.status(400).json({ error: "Invalid id" }); return; }
+  if (!verifyUpdateToken(id, token)) { res.status(403).json({ error: "Invalid or missing token" }); return; }
+  try {
+    const [row] = await db.select().from(commitmentsTable).where(eq(commitmentsTable.id, id));
+    if (!row) { res.status(404).json({ error: "Not found" }); return; }
+    const missing = missingForCommitment(row);
+    if (missing.length === 0) {
+      res.status(404).json({ error: "Record is already complete — no update needed" });
+      return;
+    }
+    res.json({
+      id: row.id,
+      complete: false,
+      missing,
+      fullName: isMissingName(row.fullName) ? "" : row.fullName,
+      email: isMissingEmail(row.email) ? "" : row.email,
+      phone: isMissingPhone(row.phone) ? "" : row.phone,
+      street: row.street,
+      houseNumber: row.houseNumber,
+    });
+  } catch (err) {
+    req.log.error(err);
+    res.status(500).json({ error: "Failed to fetch record" });
+  }
+});
+
+// PUBLIC: resident self-update — token-gated, only fills fields that were originally missing.
+router.put("/commitments/:id/self-update", async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const token = typeof req.query.t === "string" ? req.query.t : (typeof (req.body as Record<string, unknown>)?.t === "string" ? (req.body as Record<string, string>).t : undefined);
+  if (isNaN(id)) { res.status(400).json({ error: "Invalid id" }); return; }
+  if (!verifyUpdateToken(id, token)) { res.status(403).json({ error: "Invalid or missing token" }); return; }
+  try {
+    const [row] = await db.select().from(commitmentsTable).where(eq(commitmentsTable.id, id));
+    if (!row) { res.status(404).json({ error: "Not found" }); return; }
+    const missing = missingForCommitment(row);
+    if (missing.length === 0) { res.status(400).json({ error: "Record is already complete" }); return; }
+
+    const body = req.body as Record<string, unknown>;
+    const patch: Record<string, unknown> = {};
+    if (missing.includes("Name") && typeof body.fullName === "string" && body.fullName.trim()) {
+      patch.fullName = body.fullName.trim();
+    }
+    if (missing.includes("Phone") && typeof body.phone === "string" && body.phone.trim()) {
+      patch.phone = body.phone.trim();
+    }
+    if (missing.includes("Email") && typeof body.email === "string" && body.email.trim()) {
+      patch.email = body.email.trim();
+    }
+    if (Object.keys(patch).length === 0) {
+      res.status(400).json({ error: "Please fill in at least one of the missing fields" });
+      return;
+    }
+    const [updated] = await db.update(commitmentsTable).set(patch).where(eq(commitmentsTable.id, id)).returning();
+    res.json({ id: updated?.id, updated: Object.keys(patch), stillMissing: missingForCommitment(updated!) });
+  } catch (err) {
+    req.log.error(err);
+    res.status(500).json({ error: "Failed to update record" });
   }
 });
 

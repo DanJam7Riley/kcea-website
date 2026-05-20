@@ -18,23 +18,32 @@ type Tab = typeof TABS[number];
 
 interface IncompleteCommitment {
   id: number;
+  kind?: "commitment" | "profile";
   fullName: string;
-  email: string;
+  email: string | null;
   phone: string;
   street: string;
   houseNumber: string;
   commitmentType: string;
   submittedAt: string;
   missingFields: string[];
+  updateToken?: string;
 }
 
-function makeWhatsAppUrl(phone: string, missingFields: string[]): string | null {
+const UPDATE_BASE_URL = "https://attached-assets-janineriley.replit.app";
+
+function makeUpdateLink(id: number, token: string): string {
+  return `${UPDATE_BASE_URL}/update?id=${id}&t=${token}`;
+}
+
+function makeIncompleteWaUrl(phone: string, name: string, street: string, id: number, token: string): string | null {
   const digits = phone.replace(/[\s()\-+]/g, "");
   if (!digits || digits.length < 7) return null;
   const normalized = digits.startsWith("0") ? "27" + digits.slice(1) : digits;
   if (!/^\d{10,15}$/.test(normalized)) return null;
-  const fieldList = missingFields.join(" and ");
-  const msg = `Hi, this is the KCEA team. We have your commitment form on record but some details are missing. Could you please reply with your ${fieldList} so we can update our record? Thank you!`;
+  const firstName = (name || "there").split(/\s+/)[0] || "there";
+  const streetLabel = street ? ` for ${street}` : "";
+  const msg = `Hi ${firstName}, we have your commitment on record${streetLabel} but are missing some details. Please update your info here: ${makeUpdateLink(id, token)}`;
   return `https://wa.me/${normalized}?text=${encodeURIComponent(msg)}`;
 }
 
@@ -984,7 +993,7 @@ export default function Admin() {
             <CardHeader>
               <CardTitle className="text-xl">Incomplete Records</CardTitle>
               <p className="text-sm text-muted-foreground mt-1">
-                Commitment submissions that are missing one or more fields (name, phone, or email).
+                Commitments missing name, phone or email — plus captain profiles missing a phone number.
               </p>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -1005,16 +1014,34 @@ export default function Admin() {
                     <div className="col-span-2"></div>
                   </div>
                   {incompleteRecords.map(c => {
-                    const waUrl = c.phone && c.phone !== "-" ? makeWhatsAppUrl(c.phone, c.missingFields) : null;
+                    const isProfile = c.kind === "profile";
+                    const hasPhone = !!(c.phone && c.phone !== "-");
+                    const hasEmail = !!(c.email && c.email !== "imported@kcea.local");
+                    const token = c.updateToken ?? "";
+                    const waUrl = !isProfile && hasPhone && token ? makeIncompleteWaUrl(c.phone, c.fullName, c.street, c.id, token) : null;
+                    const mailtoUrl = !isProfile && !hasPhone && hasEmail && token
+                      ? `mailto:${c.email}?subject=${encodeURIComponent("KCEA — please update your details")}&body=${encodeURIComponent(`Hi ${(c.fullName || "there").split(/\s+/)[0]}, we have your commitment on record${c.street ? ` for ${c.street}` : ""} but are missing some details. Please update your info here: ${makeUpdateLink(c.id, token)}`)}`
+                      : null;
                     return (
-                      <div key={c.id} className="grid grid-cols-12 gap-3 items-center px-3 py-3 rounded-lg bg-background/50 border border-amber-500/20 hover:border-amber-500/30 transition-colors">
+                      <div key={`${c.kind || "commitment"}-${c.id}`} className="grid grid-cols-12 gap-3 items-center px-3 py-3 rounded-lg bg-background/50 border border-amber-500/20 hover:border-amber-500/30 transition-colors">
                         <div className="col-span-3">
-                          <p className="font-medium text-sm">{c.fullName || <span className="italic text-muted-foreground">No name</span>}</p>
-                          <p className="text-xs text-muted-foreground">#{c.id} · {new Date(c.submittedAt).toLocaleDateString("en-ZA", { day: "2-digit", month: "short", year: "numeric" })}</p>
+                          <p className="font-medium text-sm">
+                            {c.fullName || <span className="italic text-muted-foreground">No name</span>}
+                            {isProfile && <Badge className="ml-2 bg-blue-500/15 text-blue-300 border-blue-400/30 text-[10px]" variant="outline">Captain profile</Badge>}
+                          </p>
+                          <p className="text-xs text-muted-foreground">
+                            {isProfile ? `Profile #${c.id}` : `#${c.id} · ${new Date(c.submittedAt).toLocaleDateString("en-ZA", { day: "2-digit", month: "short", year: "numeric" })}`}
+                          </p>
                         </div>
                         <div className="col-span-2">
-                          <p className="text-sm">{c.street}</p>
-                          <p className="text-xs text-muted-foreground">No. {c.houseNumber}</p>
+                          {isProfile ? (
+                            <p className="text-xs text-muted-foreground italic">—</p>
+                          ) : (
+                            <>
+                              <p className="text-sm">{c.street}</p>
+                              <p className="text-xs text-muted-foreground">No. {c.houseNumber}</p>
+                            </>
+                          )}
                         </div>
                         <div className="col-span-2">
                           <div className="flex flex-wrap gap-1">
@@ -1026,27 +1053,39 @@ export default function Admin() {
                           </div>
                         </div>
                         <div className="col-span-3 min-w-0">
-                          {c.email && c.email !== "imported@kcea.local" ? (
+                          {hasEmail ? (
                             <p className="text-xs truncate">{c.email}</p>
                           ) : (
                             <p className="text-xs text-muted-foreground italic">No email</p>
                           )}
-                          {c.phone && c.phone !== "-" ? (
+                          {hasPhone ? (
                             <p className="text-xs text-muted-foreground">{c.phone}</p>
                           ) : (
                             <p className="text-xs text-muted-foreground italic">No phone</p>
                           )}
+                          {!isProfile && !hasPhone && hasEmail && (
+                            <p className="text-[10px] text-amber-400/80 italic mt-0.5">No phone — contact by email</p>
+                          )}
                         </div>
                         <div className="col-span-2 flex justify-end">
-                          {waUrl ? (
+                          {isProfile ? (
+                            <span className="text-xs text-muted-foreground italic text-right">Enter phone in<br/>Captains tab</span>
+                          ) : waUrl ? (
                             <a href={waUrl} target="_blank" rel="noopener noreferrer">
                               <Button size="sm" variant="outline" className="h-8 text-xs px-2 gap-1.5 border-green-500/40 text-green-400 hover:bg-green-500/10">
                                 <ExternalLink className="h-3 w-3" />
                                 WhatsApp
                               </Button>
                             </a>
+                          ) : mailtoUrl ? (
+                            <a href={mailtoUrl}>
+                              <Button size="sm" variant="outline" className="h-8 text-xs px-2 gap-1.5 border-blue-500/40 text-blue-400 hover:bg-blue-500/10">
+                                <ExternalLink className="h-3 w-3" />
+                                Email
+                              </Button>
+                            </a>
                           ) : (
-                            <span className="text-xs text-muted-foreground italic">No phone on record</span>
+                            <span className="text-xs text-muted-foreground italic">No contact info</span>
                           )}
                         </div>
                       </div>

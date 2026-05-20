@@ -185,15 +185,18 @@ function matchScore(captainName: string, commitmentName: string): number {
   return best;
 }
 
-/** For a captain (name+street), find best matching commitment phone using fuzzy first-name + street.
- *  Returns the chosen commitment, the runner-up score (for ambiguity check), and the candidate count. */
+/** For a captain (name+street), find best matching commitment phone using street + fuzzy name.
+ *  Small-street fallback: if a street has ≤2 commitments with a phone, use the first one regardless of name. */
 function findFuzzyCommitment(
   captainName: string,
   captainStreet: string,
   commitments: Array<{ fullName: string | null; phone: string | null; email: string | null; street: string | null }>,
-): { match: { fullName: string; phone: string | null; email: string | null } | null; score: number; runnerUp: number; candidates: number } {
+): { match: { fullName: string; phone: string | null; email: string | null } | null; score: number; runnerUp: number; candidates: number; via: "exact" | "fuzzy" | "small-street" | "none" } {
   const street = captainStreet.trim().toLowerCase();
   const onStreet = commitments.filter(c => (c.street ?? "").trim().toLowerCase() === street);
+  const withPhone = onStreet.filter(c => c.phone && c.phone.trim() && c.phone.trim() !== "-");
+
+  // Phase A: try name-based fuzzy match
   let best: { fullName: string; phone: string | null; email: string | null; score: number } | null = null;
   let second = 0;
   for (const c of onStreet) {
@@ -207,11 +210,24 @@ function findFuzzyCommitment(
       second = s;
     }
   }
-  return { match: best, score: best?.score ?? 0, runnerUp: second, candidates: onStreet.length };
+  if (best && !(best.score < 50 && second >= best.score - 1)) {
+    return { match: best, score: best.score, runnerUp: second, candidates: onStreet.length, via: best.score >= 1000 ? "exact" : "fuzzy" };
+  }
+
+  // Phase B: small-street fallback — ≤2 commitments with a phone on this street → very likely the captain.
+  if (withPhone.length > 0 && withPhone.length <= 2 && withPhone[0]) {
+    const c = withPhone[0];
+    return {
+      match: { fullName: c.fullName ?? "(unknown)", phone: c.phone, email: c.email },
+      score: 1, runnerUp: 0, candidates: onStreet.length, via: "small-street",
+    };
+  }
+
+  return { match: null, score: 0, runnerUp: second, candidates: onStreet.length, via: "none" };
 }
 
 export type PhoneBackfillReport = {
-  matched: Array<{ name: string; street: string; commitment: string; phone: string | null }>;
+  matched: Array<{ name: string; street: string; commitment: string; phone: string | null; via: string }>;
   ambiguous: Array<{ name: string; street: string; topScore: number; runnerUp: number }>;
   unmatched: Array<{ name: string; street: string; candidates: number }>;
   scUpdated: number;
@@ -234,18 +250,13 @@ async function backfillPhonesEverywhere(): Promise<PhoneBackfillReport> {
       report.unmatched.push({ name: c.captain, street: c.street, candidates: r.candidates });
       continue;
     }
-    // Ambiguity guard: if top score is low (<50, i.e. only a 3-4 char prefix) AND runner-up is close, skip.
-    if (r.score < 50 && r.runnerUp >= r.score - 1) {
-      report.ambiguous.push({ name: c.captain, street: c.street, topScore: r.score, runnerUp: r.runnerUp });
-      continue;
-    }
     const patch: Record<string, unknown> = {};
     if (r.match.phone) patch.phone = r.match.phone;
     if (r.match.email && !c.email) patch.email = r.match.email;
     if (Object.keys(patch).length > 0) {
       await db.update(streetCaptainsTable).set(patch).where(eq(streetCaptainsTable.id, c.id));
       report.scUpdated++;
-      report.matched.push({ name: c.captain, street: c.street, commitment: r.match.fullName, phone: r.match.phone });
+      report.matched.push({ name: c.captain, street: c.street, commitment: r.match.fullName, phone: r.match.phone, via: r.via });
     }
   }
 
