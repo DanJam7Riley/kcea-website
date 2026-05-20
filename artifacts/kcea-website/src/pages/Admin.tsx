@@ -102,6 +102,7 @@ interface CaptainProfile {
   pin: string | null;
   pinHash: string | null;
   lastLoginAt: string | null;
+  pinSentAt: string | null;
 }
 
 
@@ -230,6 +231,13 @@ export default function Admin() {
       fetch(`${BASE}/api/captains/${id}/welcomed`, { method: "POST", headers: authHeaders })
         .then(async r => { if (!r.ok) throw new Error(await r.text()); return r.json(); }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["captains"] }),
+  });
+
+  const markPinSent = useMutation({
+    mutationFn: (id: number) =>
+      fetch(`${BASE}/api/captain/management/${id}/mark-pin-sent`, { method: "POST", headers: authHeaders })
+        .then(async r => { if (!r.ok) throw new Error(await r.text()); return r.json(); }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["captain-profiles"] }),
   });
 
   const toggleCaptainStatus = useMutation({
@@ -930,7 +938,7 @@ export default function Admin() {
                           </button>
                           {c.phone && c.pin && c.email && (() => {
                             const welcomed = !!c.welcomedAt;
-                            const msg = `Hi ${c.captain}, you have been confirmed as Street Captain for ${c.street}! Welcome to the team 🎉\n\nYour Captain Portal login details:\n🌐 https://attached-assets-janineriley.replit.app/captain-login\n📧 Username: ${c.email}\n🔐 PIN: ${c.pin}\n\nPlease keep your PIN private. You can use the portal to track commitment progress on your street at any time.\n\nQuestions? WhatsApp Janine on ${adminWhatsapp}.\n\n- KCEA Team`;
+                            const msg = `Hi ${c.captain}, you have been confirmed as Street Captain for ${c.street}! Welcome to the team 🎉\n\nYour Captain Portal login details:\n🌐 https://attached-assets-janineriley.replit.app/captain-login\n📱 Phone number: ${c.phone}\n🔐 PIN: ${c.pin}\n\nPlease keep your PIN private. You can use the portal to track commitment progress on your street at any time.\n\nQuestions? WhatsApp Janine on ${adminWhatsapp}.\n\n- KCEA Team`;
                             const url = makeResidentWaUrl(c.phone, msg);
                             if (!url) return null;
                             return (
@@ -1200,26 +1208,64 @@ export default function Admin() {
                                   <div className="flex items-center gap-2 flex-wrap">
                                     <span className="font-mono text-lg font-bold text-primary tracking-[0.3em] bg-primary/10 px-3 py-1 rounded-md">{pinResult.pin}</span>
                                     {p.phone && (() => {
-                                      const msg = `Hi ${p.name}, your KCEA Captain Portal login: attached-assets-janineriley.replit.app/captain-login | Username: ${p.name} | PIN: ${pinResult.pin}. Keep your PIN private. Questions? WhatsApp ${adminWhatsapp}.`;
+                                      const msg = `Hi ${p.name}, your KCEA Captain Portal login: attached-assets-janineriley.replit.app/captain-login | 📱 Phone number: ${p.phone} | PIN: ${pinResult.pin}. Keep your PIN private. Questions? WhatsApp ${adminWhatsapp}.`;
                                       const url = makeResidentWaUrl(p.phone, msg);
-                                      return url ? (
-                                        <a href={url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs text-green-400 bg-green-500/10 border border-green-500/20 hover:bg-green-500/20 transition-colors">
-                                          <MessageSquare className="h-3 w-3" />Send PIN via WhatsApp
-                                        </a>
-                                      ) : null;
+                                      if (!url) return null;
+                                      const sent = !!p.pinSentAt;
+                                      const sentDate = sent ? new Date(p.pinSentAt!).toLocaleDateString("en-ZA", { day: "2-digit", month: "short", year: "numeric" }) : null;
+                                      return (
+                                        <div className="flex flex-col items-start gap-0.5">
+                                          <div className="flex items-center gap-1.5">
+                                            {sent ? (
+                                              <>
+                                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs text-muted-foreground bg-muted/40 border border-border">
+                                                  <CheckCircle className="h-3 w-3" />PIN Sent ✓
+                                                </span>
+                                                <a href={url} target="_blank" rel="noopener noreferrer" onClick={() => markPinSent.mutate(p.id)} className="text-xs text-primary hover:underline">
+                                                  Resend
+                                                </a>
+                                              </>
+                                            ) : (
+                                              <a href={url} target="_blank" rel="noopener noreferrer" onClick={() => markPinSent.mutate(p.id)} className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs text-green-400 bg-green-500/10 border border-green-500/20 hover:bg-green-500/20 transition-colors">
+                                                <MessageSquare className="h-3 w-3" />Send PIN via WhatsApp
+                                              </a>
+                                            )}
+                                          </div>
+                                          {sent && <span className="text-[10px] text-muted-foreground">Sent {sentDate}</span>}
+                                        </div>
+                                      );
                                     })()}
                                   </div>
                                 ) : p.pin ? (
                                   <div className="flex items-center gap-2 flex-wrap">
                                     <span className="font-mono text-lg font-bold text-foreground tracking-[0.3em] bg-background border border-border px-3 py-1 rounded-md">{p.pin}</span>
                                     {p.phone && (() => {
-                                      const msg = `Hi ${p.name}, your KCEA Captain Portal login: attached-assets-janineriley.replit.app/captain-login | Username: ${p.name} | PIN: ${p.pin}. Keep your PIN private. Questions? WhatsApp ${adminWhatsapp}.`;
+                                      const msg = `Hi ${p.name}, your KCEA Captain Portal login: attached-assets-janineriley.replit.app/captain-login | 📱 Phone number: ${p.phone} | PIN: ${p.pin}. Keep your PIN private. Questions? WhatsApp ${adminWhatsapp}.`;
                                       const url = makeResidentWaUrl(p.phone, msg);
-                                      return url ? (
-                                        <a href={url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs text-green-400 bg-green-500/10 border border-green-500/20 hover:bg-green-500/20 transition-colors">
-                                          <MessageSquare className="h-3 w-3" />Send PIN via WhatsApp
-                                        </a>
-                                      ) : null;
+                                      if (!url) return null;
+                                      const sent = !!p.pinSentAt;
+                                      const sentDate = sent ? new Date(p.pinSentAt!).toLocaleDateString("en-ZA", { day: "2-digit", month: "short", year: "numeric" }) : null;
+                                      return (
+                                        <div className="flex flex-col items-start gap-0.5">
+                                          <div className="flex items-center gap-1.5">
+                                            {sent ? (
+                                              <>
+                                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs text-muted-foreground bg-muted/40 border border-border">
+                                                  <CheckCircle className="h-3 w-3" />PIN Sent ✓
+                                                </span>
+                                                <a href={url} target="_blank" rel="noopener noreferrer" onClick={() => markPinSent.mutate(p.id)} className="text-xs text-primary hover:underline">
+                                                  Resend
+                                                </a>
+                                              </>
+                                            ) : (
+                                              <a href={url} target="_blank" rel="noopener noreferrer" onClick={() => markPinSent.mutate(p.id)} className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs text-green-400 bg-green-500/10 border border-green-500/20 hover:bg-green-500/20 transition-colors">
+                                                <MessageSquare className="h-3 w-3" />Send PIN via WhatsApp
+                                              </a>
+                                            )}
+                                          </div>
+                                          {sent && <span className="text-[10px] text-muted-foreground">Sent {sentDate}</span>}
+                                        </div>
+                                      );
                                     })()}
                                     <Button
                                       size="sm"

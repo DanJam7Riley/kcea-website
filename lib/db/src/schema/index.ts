@@ -75,6 +75,7 @@ export const captainProfilesTable = pgTable("captain_profiles", {
   pinHash: text("pin_hash"),
   lastLoginAt: timestamp("last_login_at"),
   previousLoginAt: timestamp("previous_login_at"),
+  pinSentAt: timestamp("pin_sent_at"),
 });
 
 export const siteSettingsTable = pgTable("site_settings", {

@@ -350,6 +350,26 @@ router.post("/captain/management/:id/set-pin", async (req, res) => {
   }
 });
 
+// POST /api/captain/management/:id/mark-pin-sent — admin clicked "Send PIN via WhatsApp"
+router.post("/captain/management/:id/mark-pin-sent", async (req, res) => {
+  const pw = req.headers["x-admin-password"] as string;
+  if (!pw || pw !== ADMIN_PASSWORD()) { res.status(401).json({ error: "Unauthorized" }); return; }
+  const id = parseInt(req.params.id, 10);
+  if (isNaN(id)) { res.status(400).json({ error: "Invalid id" }); return; }
+  try {
+    const [updated] = await db
+      .update(captainProfilesTable)
+      .set({ pinSentAt: new Date() })
+      .where(eq(captainProfilesTable.id, id))
+      .returning();
+    if (!updated) { res.status(404).json({ error: "Not found" }); return; }
+    res.json(updated);
+  } catch (err) {
+    req.log.error(err);
+    res.status(500).json({ error: "Failed to mark PIN sent" });
+  }
+});
+
 // DELETE /api/captain/management/:id
 router.delete("/captain/management/:id", async (req, res) => {
   const pw = req.headers["x-admin-password"] as string;

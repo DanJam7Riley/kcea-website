@@ -80,6 +80,7 @@ async function splitCombinedCaptains(): Promise<number> {
 async function ensureSchema(): Promise<void> {
   await db.execute(sql`ALTER TABLE street_captains ADD COLUMN IF NOT EXISTS welcomed_at timestamp`);
   await db.execute(sql`ALTER TABLE captain_profiles ADD COLUMN IF NOT EXISTS previous_login_at timestamp`);
+  await db.execute(sql`ALTER TABLE captain_profiles ADD COLUMN IF NOT EXISTS pin_sent_at timestamp`);
 }
 
 /** Apply canonical name renames + remove non-captain assist rows. Idempotent. */
