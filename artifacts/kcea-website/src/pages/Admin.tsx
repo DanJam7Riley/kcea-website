@@ -2,7 +2,7 @@ import { useState, useRef, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Shield, Save, LogIn, AlertTriangle, CheckCircle, Check, Key,
-  Trash2, Download, Upload, Users, ClipboardList, BarChart3, Search, MessageSquare, RefreshCw, Phone, ExternalLink
+  Trash2, Download, Upload, Users, ClipboardList, BarChart3, Search, MessageSquare, RefreshCw, Phone, ExternalLink, Settings as SettingsIcon
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -13,7 +13,7 @@ import { Badge } from "@/components/ui/badge";
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 
 const STATUS_OPTIONS = ["Strong", "Good", "Solid", "Steady", "In Progress", "Re-engaged", "Critical"];
-const TABS = ["submissions", "stats", "captains", "incomplete", "captain-mgmt"] as const;
+const TABS = ["submissions", "stats", "captains", "incomplete", "captain-mgmt", "settings"] as const;
 type Tab = typeof TABS[number];
 
 interface IncompleteCommitment {
@@ -240,6 +240,31 @@ export default function Admin() {
       if (!r.ok) throw new Error(await r.text()); return r.json();
     }),
     enabled: authed && activeTab === "captain-mgmt",
+  });
+
+  const { data: siteSettings } = useQuery<{ notifyWhatsapp: string | null }>({
+    queryKey: ["site-settings"],
+    queryFn: () => fetch(`${BASE}/api/settings`, { headers: authHeaders }).then(async r => {
+      if (!r.ok) throw new Error(await r.text()); return r.json();
+    }),
+    enabled: authed,
+  });
+  const adminWhatsapp = siteSettings?.notifyWhatsapp || "0832355052";
+  const [whatsappEdit, setWhatsappEdit] = useState<string | null>(null);
+  const [whatsappSaved, setWhatsappSaved] = useState(false);
+  const updateSettings = useMutation({
+    mutationFn: (data: { notifyWhatsapp?: string }) =>
+      fetch(`${BASE}/api/settings`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", ...authHeaders },
+        body: JSON.stringify(data),
+      }).then(async r => { if (!r.ok) throw new Error(await r.text()); return r.json(); }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["site-settings"] });
+      setWhatsappEdit(null);
+      setWhatsappSaved(true);
+      setTimeout(() => setWhatsappSaved(false), 3000);
+    },
   });
 
   const { data: captainNotes = [] } = useQuery<CaptainNote[]>({
@@ -539,7 +564,7 @@ export default function Admin() {
 
         {/* Tabs */}
         <div className="flex gap-1 border-b border-border">
-          {([ ["submissions", ClipboardList, "Submissions"], ["stats", BarChart3, "Stats"], ["captains", Users, "Captains"], ["incomplete", AlertTriangle, "Incomplete"], ["captain-mgmt", Key, "Captain Portal"] ] as const).map(([tab, Icon, label]) => (
+          {([ ["submissions", ClipboardList, "Submissions"], ["stats", BarChart3, "Stats"], ["captains", Users, "Captains"], ["incomplete", AlertTriangle, "Incomplete"], ["captain-mgmt", Key, "Captain Portal"], ["settings", SettingsIcon, "Settings"] ] as const).map(([tab, Icon, label]) => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
@@ -873,7 +898,7 @@ export default function Admin() {
                             {isActive ? "Active Captain" : "Pending / New Volunteer"}
                           </button>
                           {!isActive && c.phone && (() => {
-                            const msg = `Hi ${c.captain}, thank you for volunteering to be a Street Captain for ${c.street}! Your application is under review. The KCEA committee will be in touch soon. Questions? WhatsApp us at 0832355052.`;
+                            const msg = `Hi ${c.captain}, thank you for volunteering to be a Street Captain for ${c.street}! Your application is under review. The KCEA committee will be in touch soon. Questions? WhatsApp us at ${adminWhatsapp}.`;
                             const url = makeResidentWaUrl(c.phone, msg);
                             return url ? (
                               <a href={url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs text-green-400 bg-green-500/10 border border-green-500/20 hover:bg-green-500/20 transition-colors">
@@ -882,7 +907,7 @@ export default function Admin() {
                             ) : null;
                           })()}
                           {isActive && c.phone && (() => {
-                            const msg = `Hi ${c.captain}, you have been confirmed as Street Captain for ${c.street}! Welcome to the team. Your captain portal: attached-assets-janineriley.replit.app/captain-login${c.email ? ` | Username: ${c.email}` : ""}. The KCEA committee will send your PIN separately. Questions? WhatsApp 0832355052.`;
+                            const msg = `Hi ${c.captain}, you have been confirmed as Street Captain for ${c.street}! Welcome to the team. Your captain portal: attached-assets-janineriley.replit.app/captain-login${c.email ? ` | Username: ${c.email}` : ""}. The KCEA committee will send your PIN separately. Questions? WhatsApp ${adminWhatsapp}.`;
                             const url = makeResidentWaUrl(c.phone, msg);
                             return url ? (
                               <a href={url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs text-blue-400 bg-blue-500/10 border border-blue-500/20 hover:bg-blue-500/20 transition-colors">
@@ -1106,7 +1131,7 @@ export default function Admin() {
                                   <div className="flex items-center gap-2 flex-wrap">
                                     <span className="font-mono text-lg font-bold text-primary tracking-[0.3em] bg-primary/10 px-3 py-1 rounded-md">{pinResult.pin}</span>
                                     {p.phone && (() => {
-                                      const msg = `Hi ${p.name}, your KCEA Captain Portal login: attached-assets-janineriley.replit.app/captain-login | Username: ${p.name} | PIN: ${pinResult.pin}. Keep your PIN private. Questions? WhatsApp 0832355052.`;
+                                      const msg = `Hi ${p.name}, your KCEA Captain Portal login: attached-assets-janineriley.replit.app/captain-login | Username: ${p.name} | PIN: ${pinResult.pin}. Keep your PIN private. Questions? WhatsApp ${adminWhatsapp}.`;
                                       const url = makeResidentWaUrl(p.phone, msg);
                                       return url ? (
                                         <a href={url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs text-green-400 bg-green-500/10 border border-green-500/20 hover:bg-green-500/20 transition-colors">
@@ -1119,7 +1144,7 @@ export default function Admin() {
                                   <div className="flex items-center gap-2 flex-wrap">
                                     <span className="font-mono text-lg font-bold text-foreground tracking-[0.3em] bg-background border border-border px-3 py-1 rounded-md">{p.pin}</span>
                                     {p.phone && (() => {
-                                      const msg = `Hi ${p.name}, your KCEA Captain Portal login: attached-assets-janineriley.replit.app/captain-login | Username: ${p.name} | PIN: ${p.pin}. Keep your PIN private. Questions? WhatsApp 0832355052.`;
+                                      const msg = `Hi ${p.name}, your KCEA Captain Portal login: attached-assets-janineriley.replit.app/captain-login | Username: ${p.name} | PIN: ${p.pin}. Keep your PIN private. Questions? WhatsApp ${adminWhatsapp}.`;
                                       const url = makeResidentWaUrl(p.phone, msg);
                                       return url ? (
                                         <a href={url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs text-green-400 bg-green-500/10 border border-green-500/20 hover:bg-green-500/20 transition-colors">
@@ -1210,6 +1235,46 @@ export default function Admin() {
           </div>
         )}
 
+        {/* Settings Tab */}
+        {activeTab === "settings" && (
+          <div className="space-y-6">
+            <Card className="bg-card border-card-border">
+              <CardHeader className="pb-4">
+                <CardTitle className="text-xl flex items-center gap-2"><SettingsIcon className="h-5 w-5" /> Site Settings</CardTitle>
+                <p className="text-sm text-muted-foreground mt-1">Configuration values used across the admin and captain portals. Not visible on the public site.</p>
+              </CardHeader>
+              <CardContent className="space-y-6">
+                <div className="space-y-2 max-w-md">
+                  <Label htmlFor="admin-whatsapp" className="text-sm flex items-center gap-1.5">
+                    <MessageSquare className="h-3.5 w-3.5" /> Admin WhatsApp Number
+                  </Label>
+                  <p className="text-xs text-muted-foreground">Used in WhatsApp messages sent from admin (e.g. "Questions? WhatsApp ..."). Local SA format or international, e.g. <span className="font-mono">0832355052</span> or <span className="font-mono">+27832355052</span>.</p>
+                  <div className="flex gap-2">
+                    <Input
+                      id="admin-whatsapp"
+                      value={whatsappEdit ?? adminWhatsapp}
+                      onChange={e => setWhatsappEdit(e.target.value)}
+                      placeholder="e.g. 0832355052"
+                      className="bg-background border-border"
+                    />
+                    {whatsappSaved ? (
+                      <span className="text-xs text-green-400 flex items-center gap-1 px-2"><CheckCircle className="h-4 w-4" /> Saved</span>
+                    ) : (
+                      <Button
+                        variant="outline"
+                        disabled={updateSettings.isPending || whatsappEdit === null || whatsappEdit.trim() === adminWhatsapp}
+                        onClick={() => updateSettings.mutate({ notifyWhatsapp: (whatsappEdit ?? "").trim() })}
+                        className="gap-1 shrink-0"
+                      >
+                        <Save className="h-3.5 w-3.5" /> {updateSettings.isPending ? "Saving…" : "Save"}
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        )}
 
       </main>
     </div>
