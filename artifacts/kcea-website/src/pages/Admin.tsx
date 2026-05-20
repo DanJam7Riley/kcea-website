@@ -850,9 +850,9 @@ export default function Admin() {
                   <div className="grid grid-cols-12 gap-3 px-4 py-2 text-xs font-medium text-muted-foreground uppercase tracking-wide border-b border-border">
                     <div className="col-span-2">Street</div>
                     <div className="col-span-2">Captain</div>
-                    <div className="col-span-1">Forms</div>
-                    <div className="col-span-2">Activity Status</div>
-                    <div className="col-span-3">Role</div>
+                    <div className="col-span-2">Phone</div>
+                    <div className="col-span-1">Activity</div>
+                    <div className="col-span-3">Status</div>
                     <div className="col-span-2"></div>
                   </div>
                   {captains.map(c => {
@@ -874,32 +874,29 @@ export default function Admin() {
                             placeholder="Captain name"
                             className="bg-card border-border text-sm h-8"
                           />
-                          {!isActive && (c.phone || c.email) && (
-                            <div className="mt-1 space-y-0.5">
-                              {c.phone && <p className="text-xs text-muted-foreground">{c.phone}</p>}
-                              {c.email && <p className="text-xs text-muted-foreground truncate">{c.email}</p>}
-                            </div>
+                          {c.email && (
+                            <p className="text-xs text-muted-foreground truncate mt-1">{c.email}</p>
                           )}
                           {!isActive && c.motivation && (
                             <p className="text-xs text-muted-foreground italic mt-1 leading-tight">{c.motivation}</p>
                           )}
                         </div>
-                        <div className="col-span-1">
+                        <div className="col-span-2">
                           <Input
-                            type="number"
-                            min={0}
-                            defaultValue={c.forms}
-                            key={`forms-${c.id}-${c.forms}`}
-                            onChange={e => handleCaptainChange(c.id, "forms", parseInt(e.target.value, 10) || 0)}
+                            type="tel"
+                            defaultValue={c.phone ?? ""}
+                            key={`phone-${c.id}-${c.phone ?? ""}`}
+                            onChange={e => handleCaptainChange(c.id, "phone", e.target.value)}
+                            placeholder="082 123 4567"
                             className="bg-card border-border text-sm h-8"
                           />
                         </div>
-                        <div className="col-span-2">
+                        <div className="col-span-1">
                           <select
                             defaultValue={c.status}
                             key={`status-${c.id}-${c.status}`}
                             onChange={e => handleCaptainChange(c.id, "status", e.target.value)}
-                            className="w-full h-8 rounded-md border border-border bg-card text-foreground text-sm px-2 focus:outline-none focus:ring-1 focus:ring-primary"
+                            className="w-full h-8 rounded-md border border-border bg-card text-foreground text-sm px-1 focus:outline-none focus:ring-1 focus:ring-primary"
                           >
                             {STATUS_OPTIONS.map(s => (
                               <option key={s} value={s}>{s}</option>

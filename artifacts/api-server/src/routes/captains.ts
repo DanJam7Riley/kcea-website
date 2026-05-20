@@ -97,7 +97,7 @@ router.put("/captains/:id", async (req, res) => {
   }
 
   const body = req.body as Record<string, unknown>;
-  const patch: { captain?: string; forms?: number; status?: string; captainStatus?: string } = {};
+  const patch: { captain?: string; forms?: number; status?: string; captainStatus?: string; phone?: string | null; email?: string | null } = {};
 
   if (typeof body.captain === "string" && body.captain.trim()) patch.captain = body.captain.trim();
   if (typeof body.forms === "number") patch.forms = Math.max(0, Math.floor(body.forms));
@@ -105,6 +105,8 @@ router.put("/captains/:id", async (req, res) => {
   if (body.captainStatus === "Active Captain" || body.captainStatus === "Pending / New Volunteer") {
     patch.captainStatus = body.captainStatus;
   }
+  if (typeof body.phone === "string") patch.phone = body.phone.trim() || null;
+  if (typeof body.email === "string") patch.email = body.email.trim() || null;
 
   if (Object.keys(patch).length === 0) {
     res.status(400).json({ error: "No valid fields provided" });
