@@ -49,6 +49,11 @@ interface NoteRecord {
   updatedAt: string;
 }
 
+interface ContactedResident {
+  commitmentId: number;
+  contactedAt: string;
+}
+
 interface DashboardData {
   captainName: string;
   streets: string[];
@@ -56,6 +61,7 @@ interface DashboardData {
   notCommitted: HouseRecord[];
   notes: NoteRecord[];
   newSubmissions: NewSubmission[];
+  contactedResidents: ContactedResident[];
 }
 
 function makeWaUrl(phone: string, message: string): string | null {
@@ -216,6 +222,26 @@ export default function CaptainPortal() {
     localStorage.removeItem("kcea_captain_token");
     setToken("");
     setDashboard(null);
+  };
+
+  const handleContactResident = async (commitmentId: number) => {
+    try {
+      const res = await fetch(`${BASE}/api/captain/contact-resident`, {
+        method: "POST",
+        headers: { "x-captain-token": token, "Content-Type": "application/json" },
+        body: JSON.stringify({ commitmentId }),
+      });
+      if (!res.ok) return;
+      const data = await res.json() as { commitmentId: number; contactedAt: string };
+      setDashboard(prev => {
+        if (!prev) return prev;
+        const existing = prev.contactedResidents ?? [];
+        const others = existing.filter(c => c.commitmentId !== data.commitmentId);
+        return { ...prev, contactedResidents: [...others, { commitmentId: data.commitmentId, contactedAt: data.contactedAt }] };
+      });
+    } catch {
+      // silently ignore — WhatsApp link still opens regardless
+    }
   };
 
   const toggleNote = (key: string) => {
@@ -409,6 +435,7 @@ export default function CaptainPortal() {
                 const firstName = (s.fullName || "there").split(/\s+/)[0] || "there";
                 const msg = `Hi ${firstName}, thank you for committing to the KCEA enclosure for ${s.street}! I'm your street captain. Please feel free to reach out if you have any questions. - ${dashboard.captainName}`;
                 const waUrl = makeWaUrl(s.phone, msg);
+                const contacted = (dashboard.contactedResidents ?? []).find(c => c.commitmentId === s.id);
                 return (
                   <div key={s.id} className="p-3 rounded-lg bg-primary/5 border border-primary/20 flex items-start justify-between gap-3">
                     <div className="min-w-0">
@@ -430,15 +457,34 @@ export default function CaptainPortal() {
                         {s.commitmentType === "onceoff" ? "Once-off" : "R250/mo"}
                       </Badge>
                       {waUrl ? (
-                        <a
-                          href={waUrl}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="inline-flex items-center gap-1 px-2 py-1 rounded text-xs text-green-400 bg-green-500/10 border border-green-500/20 hover:bg-green-500/20 transition-colors whitespace-nowrap"
-                        >
-                          <MessageSquare className="h-3 w-3" />
-                          WhatsApp
-                        </a>
+                        contacted ? (
+                          <div className="flex flex-col items-end gap-0.5">
+                            <span className="inline-flex items-center gap-1 px-2 py-1 rounded text-xs text-muted-foreground bg-muted/40 border border-border whitespace-nowrap">
+                              <CheckCircle className="h-3 w-3" />
+                              Sent ✓
+                            </span>
+                            <a
+                              href={waUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              onClick={() => { void handleContactResident(s.id); }}
+                              className="text-[10px] text-primary hover:underline"
+                            >
+                              Resend
+                            </a>
+                          </div>
+                        ) : (
+                          <a
+                            href={waUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            onClick={() => { void handleContactResident(s.id); }}
+                            className="inline-flex items-center gap-1 px-2 py-1 rounded text-xs text-green-400 bg-green-500/10 border border-green-500/20 hover:bg-green-500/20 transition-colors whitespace-nowrap"
+                          >
+                            <MessageSquare className="h-3 w-3" />
+                            WhatsApp
+                          </a>
+                        )
                       ) : (
                         <span className="text-[10px] text-muted-foreground italic">No phone</span>
                       )}

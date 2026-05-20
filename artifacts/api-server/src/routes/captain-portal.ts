@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { createHmac, randomBytes } from "crypto";
-import { db, captainProfilesTable, captainTokensTable, streetCaptainsTable, commitmentsTable, propertyNotesTable, streetHousesTable } from "@workspace/db";
+import { db, captainProfilesTable, captainTokensTable, streetCaptainsTable, commitmentsTable, propertyNotesTable, streetHousesTable, captainResidentContactsTable } from "@workspace/db";
 import { eq, and, inArray, gt, desc } from "drizzle-orm";
 
 const router = Router();
@@ -156,7 +156,14 @@ router.get("/captain/dashboard", async (req, res) => {
       .filter(c => new Date(c.submittedAt).getTime() > cutoff.getTime())
       .sort((a, b) => new Date(b.submittedAt).getTime() - new Date(a.submittedAt).getTime());
 
-    res.json({ captainName: profile.name, streets, committed, notCommitted, notes, newSubmissions });
+    // Which residents has THIS captain already contacted? Persisted across logins.
+    const contacts = await db
+      .select({ commitmentId: captainResidentContactsTable.commitmentId, contactedAt: captainResidentContactsTable.contactedAt })
+      .from(captainResidentContactsTable)
+      .where(eq(captainResidentContactsTable.captainProfileId, profile.id));
+    const contactedResidents = contacts.map(c => ({ commitmentId: c.commitmentId, contactedAt: c.contactedAt }));
+
+    res.json({ captainName: profile.name, streets, committed, notCommitted, notes, newSubmissions, contactedResidents });
   } catch (err) {
     req.log.error(err);
     res.status(500).json({ error: "Failed to load dashboard" });
@@ -244,6 +251,52 @@ router.post("/captain/houses", async (req, res) => {
   } catch (err) {
     req.log.error(err);
     res.status(500).json({ error: "Failed to register house" });
+  }
+});
+
+// POST /api/captain/contact-resident — captain clicked WhatsApp on a new submission
+router.post("/captain/contact-resident", async (req, res) => {
+  const token = req.headers["x-captain-token"] as string;
+  const body = req.body as Record<string, unknown>;
+  try {
+    const profile = await getProfileFromToken(token);
+    if (!profile) { res.status(401).json({ error: "Unauthorized" }); return; }
+
+    const commitmentId = typeof body.commitmentId === "number" ? body.commitmentId : parseInt(String(body.commitmentId), 10);
+    if (!Number.isFinite(commitmentId)) { res.status(400).json({ error: "commitmentId required" }); return; }
+
+    // Authorisation: the captain must own (Active on) the street this commitment belongs to.
+    const [commitment] = await db.select().from(commitmentsTable).where(eq(commitmentsTable.id, commitmentId)).limit(1);
+    if (!commitment) { res.status(404).json({ error: "Commitment not found" }); return; }
+    const streets = await getStreetsForCaptain(profile.name);
+    if (!streets.includes(commitment.street)) { res.status(403).json({ error: "Access denied" }); return; }
+
+    const now = new Date();
+    // Upsert: if a contact row already exists, refresh contactedAt (so "Resend" updates the timestamp).
+    const [existing] = await db
+      .select()
+      .from(captainResidentContactsTable)
+      .where(and(
+        eq(captainResidentContactsTable.captainProfileId, profile.id),
+        eq(captainResidentContactsTable.commitmentId, commitmentId),
+      ))
+      .limit(1);
+    if (existing) {
+      await db
+        .update(captainResidentContactsTable)
+        .set({ contactedAt: now })
+        .where(eq(captainResidentContactsTable.id, existing.id));
+    } else {
+      await db.insert(captainResidentContactsTable).values({
+        captainProfileId: profile.id,
+        commitmentId,
+        contactedAt: now,
+      });
+    }
+    res.json({ commitmentId, contactedAt: now });
+  } catch (err) {
+    req.log.error(err);
+    res.status(500).json({ error: "Failed to record contact" });
   }
 });
 

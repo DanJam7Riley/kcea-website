@@ -81,6 +81,41 @@ async function ensureSchema(): Promise<void> {
   await db.execute(sql`ALTER TABLE street_captains ADD COLUMN IF NOT EXISTS welcomed_at timestamp`);
   await db.execute(sql`ALTER TABLE captain_profiles ADD COLUMN IF NOT EXISTS previous_login_at timestamp`);
   await db.execute(sql`ALTER TABLE captain_profiles ADD COLUMN IF NOT EXISTS pin_sent_at timestamp`);
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS captain_resident_contacts (
+      id serial PRIMARY KEY,
+      captain_profile_id integer NOT NULL,
+      commitment_id integer NOT NULL,
+      contacted_at timestamp NOT NULL DEFAULT now()
+    )
+  `);
+  await db.execute(sql`
+    CREATE UNIQUE INDEX IF NOT EXISTS captain_resident_contacts_unique
+    ON captain_resident_contacts (captain_profile_id, commitment_id)
+  `);
+}
+
+/** Ensure Janine Riley (12 Nile St) is on the commitments roster. Idempotent: matches on email+street, won't duplicate. */
+async function ensureJanineRileyCommitment(): Promise<void> {
+  const email = "janine.riley@me.com";
+  const street = "Nile";
+  const existing = await db
+    .select({ id: commitmentsTable.id })
+    .from(commitmentsTable)
+    .where(and(eq(commitmentsTable.email, email), eq(commitmentsTable.street, street)))
+    .limit(1);
+  if (existing.length > 0) return;
+  await db.insert(commitmentsTable).values({
+    fullName: "Janine Riley",
+    email,
+    phone: "0832355052",
+    street,
+    houseNumber: "12",
+    commitmentType: "monthly",
+    imported: true,
+    paymentConfirmed: false,
+  });
+  logger.info({ email, street }, "Inserted missing Janine Riley commitment");
 }
 
 /** Apply canonical name renames + remove non-captain assist rows. Idempotent. */
@@ -385,6 +420,9 @@ export async function seedIfEmpty(): Promise<void> {
     for (const a of phones.ambiguous) {
       logger.info(a, "phone match ambiguous — skipped");
     }
+
+    // Ensure Janine Riley's commitment for Nile Street is on the roster (idempotent).
+    try { await ensureJanineRileyCommitment(); } catch (err) { logger.warn({ err }, "Janine commitment ensure failed"); }
 
     // Run AFTER backfill so this overrides any small-street re-fill of Paul's phone.
     const corrections = await correctKnownBadPhones();

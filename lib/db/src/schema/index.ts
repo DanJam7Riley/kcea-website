@@ -89,6 +89,13 @@ export const siteSettingsTable = pgTable("site_settings", {
 export type SiteSettings = typeof siteSettingsTable.$inferSelect;
 export type CaptainProfile = typeof captainProfilesTable.$inferSelect;
 
+export const captainResidentContactsTable = pgTable("captain_resident_contacts", {
+  id: serial("id").primaryKey(),
+  captainProfileId: integer("captain_profile_id").notNull(),
+  commitmentId: integer("commitment_id").notNull(),
+  contactedAt: timestamp("contacted_at").notNull().defaultNow(),
+});
+
 export const captainTokensTable = pgTable("captain_tokens", {
   id: serial("id").primaryKey(),
   profileId: integer("profile_id").notNull(),
