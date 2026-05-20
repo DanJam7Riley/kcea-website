@@ -929,7 +929,7 @@ export default function Admin() {
                             ) : null;
                           })()}
                           {isActive && c.phone && (() => {
-                            const msg = `Hi ${c.captain}, you have been confirmed as Street Captain for ${c.street}! Welcome to the team. Your captain portal: attached-assets-janineriley.replit.app/captain-login${c.email ? ` | Username: ${c.email}` : ""}. The KCEA committee will send your PIN separately. Questions? WhatsApp ${adminWhatsapp}.`;
+                            const msg = `Hi ${c.captain}, you have been confirmed as Street Captain for ${c.street}! Welcome to the team. Your captain portal: https://attached-assets-janineriley.replit.app/captain-login${c.email ? ` | Username: ${c.email}` : ""}. The KCEA committee will send your PIN separately. Questions? WhatsApp ${adminWhatsapp}.`;
                             const url = makeResidentWaUrl(c.phone, msg);
                             return url ? (
                               <a href={url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs text-blue-400 bg-blue-500/10 border border-blue-500/20 hover:bg-blue-500/20 transition-colors">
