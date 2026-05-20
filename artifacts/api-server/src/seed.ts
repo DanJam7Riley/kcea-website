@@ -148,52 +148,126 @@ async function syncCaptainProfiles(): Promise<number> {
   return toInsert.length;
 }
 
-/** Backfill phones into street_captains AND captain_profiles by exact name match against commitments. */
-async function backfillPhonesEverywhere(): Promise<{ captains: number; profiles: number }> {
-  const commitments = await db.select().from(commitmentsTable);
-  const phoneByName = new Map<string, string>();
-  const emailByName = new Map<string, string>();
-  for (const c of commitments) {
-    if (!c.fullName) continue;
-    const key = c.fullName.trim().toLowerCase();
-    if (c.phone && c.phone !== "Unknown" && !phoneByName.has(key)) phoneByName.set(key, c.phone);
-    if (c.email && c.email !== "Unknown" && !emailByName.has(key)) emailByName.set(key, c.email);
-  }
+/** Normalize a name to lowercase alphanumeric tokens (handles "Jo-Anne" → ["joanne"]). */
+function nameTokens(name: string): string[] {
+  return name
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, "")
+    .split(/\s+/)
+    .filter(t => t.length >= 2);
+}
 
-  let scUpdated = 0;
+/** Length of shared prefix between two strings. */
+function sharedPrefixLen(a: string, b: string): number {
+  let i = 0;
+  const max = Math.min(a.length, b.length);
+  while (i < max && a[i] === b[i]) i++;
+  return i;
+}
+
+/** Score how well a captain name matches a commitment name, ignoring whitespace/punctuation.
+ *  Higher = better. 0 means no match. */
+function matchScore(captainName: string, commitmentName: string): number {
+  const ct = nameTokens(captainName);
+  const mt = nameTokens(commitmentName);
+  if (ct.length === 0 || mt.length === 0) return 0;
+  // Exact full normalized match
+  if (ct.join(" ") === mt.join(" ")) return 1000;
+  // Best token-pair shared prefix (require >=4 chars to avoid coincidental false hits like "mar"/"martineit").
+  let best = 0;
+  for (const a of ct) {
+    for (const b of mt) {
+      if (a === b) { best = Math.max(best, 50 + a.length); continue; }
+      const sp = sharedPrefixLen(a, b);
+      if (sp >= 4) best = Math.max(best, sp);
+    }
+  }
+  return best;
+}
+
+/** For a captain (name+street), find best matching commitment phone using fuzzy first-name + street.
+ *  Returns the chosen commitment, the runner-up score (for ambiguity check), and the candidate count. */
+function findFuzzyCommitment(
+  captainName: string,
+  captainStreet: string,
+  commitments: Array<{ fullName: string | null; phone: string | null; email: string | null; street: string | null }>,
+): { match: { fullName: string; phone: string | null; email: string | null } | null; score: number; runnerUp: number; candidates: number } {
+  const street = captainStreet.trim().toLowerCase();
+  const onStreet = commitments.filter(c => (c.street ?? "").trim().toLowerCase() === street);
+  let best: { fullName: string; phone: string | null; email: string | null; score: number } | null = null;
+  let second = 0;
+  for (const c of onStreet) {
+    if (!c.fullName) continue;
+    const s = matchScore(captainName, c.fullName);
+    if (s <= 0) continue;
+    if (!best || s > best.score) {
+      if (best) second = Math.max(second, best.score);
+      best = { fullName: c.fullName, phone: c.phone, email: c.email, score: s };
+    } else if (s > second) {
+      second = s;
+    }
+  }
+  return { match: best, score: best?.score ?? 0, runnerUp: second, candidates: onStreet.length };
+}
+
+export type PhoneBackfillReport = {
+  matched: Array<{ name: string; street: string; commitment: string; phone: string | null }>;
+  ambiguous: Array<{ name: string; street: string; topScore: number; runnerUp: number }>;
+  unmatched: Array<{ name: string; street: string; candidates: number }>;
+  scUpdated: number;
+  profilesUpdated: number;
+};
+
+/** Backfill phones into street_captains AND captain_profiles using fuzzy street+name match. */
+async function backfillPhonesEverywhere(): Promise<PhoneBackfillReport> {
+  const commitments = await db.select().from(commitmentsTable);
   const scRows = await db.select().from(streetCaptainsTable);
+  const cpRows = await db.select().from(captainProfilesTable);
+
+  const report: PhoneBackfillReport = { matched: [], ambiguous: [], unmatched: [], scUpdated: 0, profilesUpdated: 0 };
+
+  // Phase 1: street_captains (we have street here)
   for (const c of scRows) {
-    if (c.captain === "Unassigned") continue;
-    const key = c.captain.trim().toLowerCase();
+    if (c.captain === "Unassigned" || c.phone) continue;
+    const r = findFuzzyCommitment(c.captain, c.street, commitments);
+    if (!r.match) {
+      report.unmatched.push({ name: c.captain, street: c.street, candidates: r.candidates });
+      continue;
+    }
+    // Ambiguity guard: if top score is low (<50, i.e. only a 3-4 char prefix) AND runner-up is close, skip.
+    if (r.score < 50 && r.runnerUp >= r.score - 1) {
+      report.ambiguous.push({ name: c.captain, street: c.street, topScore: r.score, runnerUp: r.runnerUp });
+      continue;
+    }
     const patch: Record<string, unknown> = {};
-    if (!c.phone && phoneByName.has(key)) patch.phone = phoneByName.get(key);
-    if (!c.email && emailByName.has(key)) patch.email = emailByName.get(key);
+    if (r.match.phone) patch.phone = r.match.phone;
+    if (r.match.email && !c.email) patch.email = r.match.email;
     if (Object.keys(patch).length > 0) {
       await db.update(streetCaptainsTable).set(patch).where(eq(streetCaptainsTable.id, c.id));
-      scUpdated++;
+      report.scUpdated++;
+      report.matched.push({ name: c.captain, street: c.street, commitment: r.match.fullName, phone: r.match.phone });
     }
   }
 
-  let cpUpdated = 0;
-  const cpRows = await db.select().from(captainProfilesTable);
-  // Also build a phone lookup from street_captains (in case admin entered phone there but commitments has no match).
-  const scPhoneByName = new Map<string, string>();
-  for (const c of scRows) {
-    if (c.captain === "Unassigned") continue;
+  // Phase 2: captain_profiles — propagate phones from street_captains by exact name match
+  // (street_captains is the authoritative source after Phase 1).
+  const refreshedSc = await db.select().from(streetCaptainsTable);
+  const phoneByCaptainName = new Map<string, string>();
+  for (const c of refreshedSc) {
+    if (c.captain === "Unassigned" || !c.phone) continue;
     const key = c.captain.trim().toLowerCase();
-    if (c.phone && !scPhoneByName.has(key)) scPhoneByName.set(key, c.phone);
+    if (!phoneByCaptainName.has(key)) phoneByCaptainName.set(key, c.phone);
   }
   for (const p of cpRows) {
     if (p.phone) continue;
-    const key = p.name.trim().toLowerCase();
-    const phone = phoneByName.get(key) ?? scPhoneByName.get(key);
+    const phone = phoneByCaptainName.get(p.name.trim().toLowerCase());
     if (phone) {
       await db.update(captainProfilesTable).set({ phone }).where(eq(captainProfilesTable.id, p.id));
-      cpUpdated++;
+      report.profilesUpdated++;
     }
   }
 
-  return { captains: scUpdated, profiles: cpUpdated };
+  return report;
 }
 
 export async function seedIfEmpty(): Promise<void> {
@@ -235,8 +309,18 @@ export async function seedIfEmpty(): Promise<void> {
     if (profilesAdded > 0) logger.info({ added: profilesAdded }, "Synced captain_profiles from street_captains");
 
     const phones = await backfillPhonesEverywhere();
-    if (phones.captains > 0 || phones.profiles > 0) {
-      logger.info(phones, "Backfilled phones into street_captains + captain_profiles");
+    logger.info(
+      { scUpdated: phones.scUpdated, profilesUpdated: phones.profilesUpdated, ambiguous: phones.ambiguous.length, unmatched: phones.unmatched.length },
+      "Phone backfill complete",
+    );
+    for (const m of phones.matched) {
+      logger.info({ captain: m.name, street: m.street, commitment: m.commitment, phone: m.phone }, "phone matched");
+    }
+    for (const u of phones.unmatched) {
+      logger.info({ captain: u.name, street: u.street, candidates: u.candidates }, "phone NOT matched");
+    }
+    for (const a of phones.ambiguous) {
+      logger.info(a, "phone match ambiguous — skipped");
     }
   } catch (err) {
     logger.warn({ err }, "Seed skipped — DB may not be ready yet");
