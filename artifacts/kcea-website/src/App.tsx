@@ -16,6 +16,7 @@ function Router() {
       <Route path="/" component={Home} />
       <Route path="/admin" component={Admin} />
       <Route path="/captain" component={CaptainPortal} />
+      <Route path="/captain-login" component={CaptainPortal} />
       <Route path="/update" component={Update} />
       <Route component={NotFound} />
     </Switch>
