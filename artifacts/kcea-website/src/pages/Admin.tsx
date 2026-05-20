@@ -74,6 +74,7 @@ interface StreetCaptain {
   captainStatus: string;
   welcomedAt: string | null;
   submittedAt: string;
+  pin: string | null;
 }
 
 interface Commitment {
@@ -936,9 +937,9 @@ export default function Admin() {
                             {isToggling ? <RefreshCw className="h-3 w-3 animate-spin" /> : null}
                             {isActive ? "Active Captain" : "Pending / New Volunteer"}
                           </button>
-                          {c.phone && (() => {
+                          {c.phone && c.pin && c.email && (() => {
                             const welcomed = !!c.welcomedAt;
-                            const msg = `Hi ${c.captain}, welcome to the KCEA Street Captain team for ${c.street}! Our new website is live and you can view your street's progress at https://attached-assets-janineriley.replit.app/captain-login${c.email ? ` | Username: ${c.email}` : ""}. Your PIN will be sent separately. Questions? WhatsApp ${adminWhatsapp}. - KCEA Team`;
+                            const msg = `Hi ${c.captain}, you have been confirmed as Street Captain for ${c.street}! Welcome to the team 🎉\n\nYour Captain Portal login details:\n🌐 https://attached-assets-janineriley.replit.app/captain-login\n📧 Username: ${c.email}\n🔐 PIN: ${c.pin}\n\nPlease keep your PIN private. You can use the portal to track commitment progress on your street at any time.\n\nQuestions? WhatsApp Janine on ${adminWhatsapp}.\n\n- KCEA Team`;
                             const url = makeResidentWaUrl(c.phone, msg);
                             if (!url) return null;
                             return (

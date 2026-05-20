@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { db, streetCaptainsTable } from "@workspace/db";
+import { db, streetCaptainsTable, captainProfilesTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 
 const router = Router();
@@ -38,7 +38,18 @@ router.get("/captains", async (req, res) => {
   try {
     const all = await getOrSeedCaptains();
     if (isAdmin(req)) {
-      res.json(all);
+      // Enrich each captain with their PIN (from captain_profiles, matched by name) so the admin
+      // welcome WhatsApp button can include it. PIN is only ever exposed to admin-authenticated requests.
+      const profiles = await db
+        .select({ name: captainProfilesTable.name, pin: captainProfilesTable.pin })
+        .from(captainProfilesTable);
+      const pinByName = new Map<string, string | null>();
+      for (const p of profiles) pinByName.set(p.name.trim().toLowerCase(), p.pin);
+      const enriched = all.map(c => ({
+        ...c,
+        pin: pinByName.get(c.captain.trim().toLowerCase()) ?? null,
+      }));
+      res.json(enriched);
     } else {
       res.json(all.filter(c => c.captainStatus === "Active Captain"));
     }
