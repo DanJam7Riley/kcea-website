@@ -88,7 +88,7 @@ const STREET_OPTIONS: { value: string; label: string }[] = [
   { value: "Phoenix",      label: "Phoenix" },
   { value: "Protea",       label: "Protea" },
   { value: "Westmoreland", label: "Westmoreland" },
-  { value: "Other",        label: "Other" },
+  { value: "Other",        label: "My street is not listed" },
 ];
 
 const faqs = [
@@ -111,6 +111,7 @@ export default function Home() {
   const [formData, setFormData] = useState({
     fullName: "", email: "", phone: "", street: "", houseNumber: "", commitmentType: "monthly",
   });
+  const [customStreet, setCustomStreet] = useState("");
   const [captainAppSubmitted, setCaptainAppSubmitted] = useState(false);
   const [captainAppForm, setCaptainAppForm] = useState({
     fullName: "", street: "", phone: "", email: "", motivation: "",
@@ -193,11 +194,17 @@ export default function Home() {
 
   const handleFormSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    const isOther = formData.street === "Other";
+    const resolvedStreet = isOther ? customStreet.trim() : formData.street;
+    if (isOther && !resolvedStreet) {
+      toast({ title: "Please type your street name", variant: "destructive" });
+      return;
+    }
     try {
       const res = await fetch(`${BASE}/api/commitments`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(formData),
+        body: JSON.stringify({ ...formData, street: resolvedStreet }),
       });
       if (!res.ok) throw new Error("Server error");
     } catch {
@@ -541,6 +548,23 @@ export default function Home() {
                             value={formData.houseNumber} onChange={e => setFormData(p => ({ ...p, houseNumber: e.target.value }))} />
                         </div>
                       </div>
+                      {formData.street === "Other" && (
+                        <div className="space-y-2">
+                          <Label htmlFor="customStreet">Type your street name</Label>
+                          <Input
+                            id="customStreet"
+                            required
+                            placeholder="Type your street name"
+                            className="bg-background border-border"
+                            data-testid="input-custom-street"
+                            value={customStreet}
+                            onChange={e => setCustomStreet(e.target.value)}
+                          />
+                          <p className="text-xs text-muted-foreground">
+                            We'll log this as a new street and follow up with you. Please double-check the spelling.
+                          </p>
+                        </div>
+                      )}
                     </div>
                     
                     <div className="space-y-2">

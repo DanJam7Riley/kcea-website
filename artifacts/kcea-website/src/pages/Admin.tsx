@@ -270,6 +270,16 @@ export default function Admin() {
   }, [captains, captainSearch, captainStatusFilter]);
   const filtersActive = captainSearch.trim() !== "" || captainStatusFilter !== "all";
 
+  const knownStreets = useMemo(() => {
+    const set = new Set<string>();
+    for (const c of captains) set.add(c.street.trim().toLowerCase());
+    return set;
+  }, [captains]);
+  const isNewStreet = (street: string) => {
+    const s = (street ?? "").trim().toLowerCase();
+    return s.length > 0 && !knownStreets.has(s);
+  };
+
   const { data: commitments = [], isLoading: commitmentsLoading } = useQuery<Commitment[]>({
     queryKey: ["commitments"],
     queryFn: () =>
@@ -399,6 +409,21 @@ export default function Admin() {
       fetch(`${BASE}/api/captains/${id}`, { method: "DELETE", headers: authHeaders })
         .then(async r => { if (!r.ok) throw new Error(await r.text()); return r.json(); }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["captains"] }),
+  });
+
+  const addStreet = useMutation({
+    mutationFn: (street: string) =>
+      fetch(`${BASE}/api/captains/add-street`, {
+        method: "POST",
+        headers: { ...authHeaders, "Content-Type": "application/json" },
+        body: JSON.stringify({ street }),
+      }).then(async r => { if (!r.ok) throw new Error(await r.text()); return r.json(); }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["captains"] });
+    },
+    onError: (err: Error) => {
+      alert(`Could not add street: ${err.message || "Try again."}`);
+    },
   });
 
   const confirmPayment = useMutation({
@@ -874,15 +899,39 @@ export default function Admin() {
                     <div className="col-span-1">Date</div>
                     <div className="col-span-3"></div>
                   </div>
-                  {filtered.map(c => (
-                    <div key={c.id} className="grid grid-cols-12 gap-3 items-center px-3 py-3 rounded-lg bg-background/50 border border-border hover:border-border/80 transition-colors">
+                  {filtered.map(c => {
+                    const newStreet = isNewStreet(c.street);
+                    return (
+                    <div key={c.id} className={`grid grid-cols-12 gap-3 items-center px-3 py-3 rounded-lg border transition-colors ${newStreet ? "bg-amber-500/5 border-amber-500/40 hover:border-amber-500/60" : "bg-background/50 border-border hover:border-border/80"}`} data-testid={`submission-row-${c.id}`}>
                       <div className="col-span-2">
                         <p className="font-medium text-sm">{c.fullName}</p>
                         <p className="text-xs text-muted-foreground">#{c.id}</p>
                       </div>
                       <div className="col-span-2">
-                        <p className="text-sm">{c.street}</p>
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <p className="text-sm">{c.street}</p>
+                          {newStreet && (
+                            <Badge className="bg-amber-500/20 text-amber-400 border-amber-500/30 text-[10px] px-1.5 py-0 h-4" variant="outline" data-testid={`badge-new-street-${c.id}`}>
+                              New Street
+                            </Badge>
+                          )}
+                        </div>
                         <p className="text-xs text-muted-foreground">No. {c.houseNumber}</p>
+                        {newStreet && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (confirm(`Add "${c.street}" to the streets list with a default of 20 households? You can edit the target later in the Captains tab.`)) {
+                                addStreet.mutate(c.street.trim());
+                              }
+                            }}
+                            disabled={addStreet.isPending}
+                            className="mt-1 text-[11px] text-amber-300 hover:text-amber-200 underline underline-offset-2 disabled:opacity-50"
+                            data-testid={`btn-add-street-${c.id}`}
+                          >
+                            Add {c.street} to streets list
+                          </button>
+                        )}
                       </div>
                       <div className="col-span-2 min-w-0">
                         <p className="text-xs truncate">{c.email}</p>
@@ -935,7 +984,8 @@ export default function Admin() {
                         </button>
                       </div>
                     </div>
-                  ))}
+                    );
+                  })}
                   <p className="text-xs text-muted-foreground pt-1">
                     Showing {filtered.length} of {commitments.length} submissions
                   </p>

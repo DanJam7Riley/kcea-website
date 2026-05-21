@@ -106,6 +106,44 @@ router.post("/captains", async (req, res) => {
   }
 });
 
+// Admin-only: add a new street to the roster as Unassigned (target 20). Used when a resident
+// submits a commitment for a street that isn't on the official list yet.
+router.post("/captains/add-street", async (req, res) => {
+  if (!isAdmin(req)) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+  const body = req.body as Record<string, unknown>;
+  const streetRaw = typeof body.street === "string" ? body.street.trim() : "";
+  if (!streetRaw) {
+    res.status(400).json({ error: "Street name is required" });
+    return;
+  }
+  try {
+    const existing = await db.select({ id: streetCaptainsTable.id, street: streetCaptainsTable.street }).from(streetCaptainsTable);
+    const dup = existing.find(r => r.street.trim().toLowerCase() === streetRaw.toLowerCase());
+    if (dup) {
+      res.status(409).json({ error: "Street already on roster", id: dup.id });
+      return;
+    }
+    const [created] = await db
+      .insert(streetCaptainsTable)
+      .values({
+        street: streetRaw,
+        captain: "Unassigned",
+        forms: 0,
+        status: "In Progress",
+        targetHouseholds: 20,
+        captainStatus: "Active Captain",
+      })
+      .returning();
+    res.status(201).json(created);
+  } catch (err) {
+    req.log.error(err);
+    res.status(500).json({ error: "Failed to add street" });
+  }
+});
+
 router.post("/captains/:id/welcomed", async (req, res) => {
   if (!isAdmin(req)) {
     res.status(401).json({ error: "Unauthorized" });
