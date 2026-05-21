@@ -99,7 +99,6 @@ const faqs = [
   { q: "How does the application process work?", a: "We apply under the CoJ Security Access Restriction Policy 2018 via the JRA. Requirements: 60% property owner consent, a Traffic Impact Study, and full financial backing." },
   { q: "Will the enclosure close all streets?", a: "No — boom gates will be installed at key entry and exit points only. Emergency vehicles, Pikitup, and public transport maintain access at all times. Pedestrian access is legally required at every point and will be provided." },
   { q: "Can I pay monthly or as a lump sum?", a: "Both. R250/month ongoing, or R3,000 once-off (equivalent to 12 months in advance). Paying upfront gives us a lump sum to kickstart Phase 1 faster. Submit the form and your street captain will be in touch with payment details." },
-  { q: "What happens to my money if the Council doesn't approve the application?", a: "Council approval is not guaranteed. If the application is not approved, any funds still on hand — i.e. not yet spent on the consultant, Traffic Impact Study, or Council application costs — will be refunded to contributors proportionally to what they paid in. We want every resident to understand this risk before committing." },
   { q: "What if I don't want to commit financially?", a: "The project depends on community funding. If you're not ready, you can still help by sharing this site, supporting your street captain, or volunteering as a captain yourself." },
   { q: "Is there a street captain for my street?", a: "Most streets are listed above. If yours shows 'Assigned' or is missing, email Jomartins111@gmail.com or use the volunteer form to step up." },
   { q: "How do I know my payment was received?", a: "Email proof of payment to Jomartins111@gmail.com with your name and street in the subject line. Your street captain will confirm receipt." }
@@ -472,15 +471,6 @@ export default function Home() {
                   </p>
                 </div>
 
-                <div className="bg-background/50 border border-border rounded-lg p-4 space-y-2">
-                  <h4 className="font-semibold text-foreground">If the application is <span className="text-primary">not approved</span> — refund policy</h4>
-                  <p className="text-sm text-muted-foreground leading-relaxed">
-                    Council approval is not guaranteed. If our application is <strong className="text-foreground">not approved</strong>,
-                    any funds still on hand (i.e. not yet spent on the consultant, Traffic Impact Study, or application costs) will be
-                    <strong className="text-foreground"> refunded to contributors proportionally</strong> to what they paid in. We want you to
-                    understand this risk before you commit.
-                  </p>
-                </div>
               </div>
 
               <p className="text-xs text-muted-foreground">Questions? Speak to your street captain or email Jomartins111@gmail.com.</p>
