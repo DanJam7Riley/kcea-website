@@ -293,7 +293,7 @@ export default function Admin() {
 
   const markPinSent = useMutation({
     mutationFn: (id: number) =>
-      fetch(`${BASE}/api/captain/management/${id}/mark-pin-sent`, { method: "POST", headers: authHeaders })
+      fetch(`${BASE}/api/captain/management/${id}/mark-pin-sent`, { method: "POST", headers: authHeaders, keepalive: true })
         .then(async r => { if (!r.ok) throw new Error(await r.text()); return r.json(); }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["captain-profiles"] }),
   });
@@ -1302,12 +1302,12 @@ export default function Admin() {
                                                 <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs text-muted-foreground bg-muted/40 border border-border">
                                                   <CheckCircle className="h-3 w-3" />PIN Sent ✓
                                                 </span>
-                                                <a href={url} target="_blank" rel="noopener noreferrer" onClick={() => markPinSent.mutate(p.id)} className="text-xs text-primary hover:underline">
+                                                <a href={url} target="_blank" rel="noopener noreferrer" onPointerDown={(e) => { if (e.button === 0) markPinSent.mutate(p.id); }} onClick={() => markPinSent.mutate(p.id)} className="text-xs text-primary hover:underline">
                                                   Resend
                                                 </a>
                                               </>
                                             ) : (
-                                              <a href={url} target="_blank" rel="noopener noreferrer" onClick={() => markPinSent.mutate(p.id)} className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs text-green-400 bg-green-500/10 border border-green-500/20 hover:bg-green-500/20 transition-colors">
+                                              <a href={url} target="_blank" rel="noopener noreferrer" onPointerDown={(e) => { if (e.button === 0) markPinSent.mutate(p.id); }} onClick={() => markPinSent.mutate(p.id)} className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs text-green-400 bg-green-500/10 border border-green-500/20 hover:bg-green-500/20 transition-colors">
                                                 <MessageSquare className="h-3 w-3" />Send PIN via WhatsApp
                                               </a>
                                             )}
@@ -1334,12 +1334,12 @@ export default function Admin() {
                                                 <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs text-muted-foreground bg-muted/40 border border-border">
                                                   <CheckCircle className="h-3 w-3" />PIN Sent ✓
                                                 </span>
-                                                <a href={url} target="_blank" rel="noopener noreferrer" onClick={() => markPinSent.mutate(p.id)} className="text-xs text-primary hover:underline">
+                                                <a href={url} target="_blank" rel="noopener noreferrer" onPointerDown={(e) => { if (e.button === 0) markPinSent.mutate(p.id); }} onClick={() => markPinSent.mutate(p.id)} className="text-xs text-primary hover:underline">
                                                   Resend
                                                 </a>
                                               </>
                                             ) : (
-                                              <a href={url} target="_blank" rel="noopener noreferrer" onClick={() => markPinSent.mutate(p.id)} className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs text-green-400 bg-green-500/10 border border-green-500/20 hover:bg-green-500/20 transition-colors">
+                                              <a href={url} target="_blank" rel="noopener noreferrer" onPointerDown={(e) => { if (e.button === 0) markPinSent.mutate(p.id); }} onClick={() => markPinSent.mutate(p.id)} className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs text-green-400 bg-green-500/10 border border-green-500/20 hover:bg-green-500/20 transition-colors">
                                                 <MessageSquare className="h-3 w-3" />Send PIN via WhatsApp
                                               </a>
                                             )}

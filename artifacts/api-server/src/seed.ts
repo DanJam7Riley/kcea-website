@@ -1,5 +1,5 @@
 import { db, siteStatsTable, streetCaptainsTable, commitmentsTable, captainProfilesTable } from "@workspace/db";
-import { and, count, eq, sql } from "drizzle-orm";
+import { and, count, eq, isNull, sql } from "drizzle-orm";
 import { logger } from "./lib/logger";
 
 /** Canonical name renames so street_captains.captain matches captain_profiles.name exactly. */
@@ -132,6 +132,24 @@ async function ensureStreetTargets(): Promise<void> {
       .update(streetCaptainsTable)
       .set({ targetHouseholds: target })
       .where(and(eq(streetCaptainsTable.street, street), eq(streetCaptainsTable.targetHouseholds, 30)));
+  }
+}
+
+/** One-time backfill: mark these captains as having had their PIN sent on 2026-05-21.
+ *  Idempotent: only sets pin_sent_at when it is currently NULL, so re-sends or admin edits are preserved. */
+const PIN_SENT_BACKFILL: Array<{ name: string }> = [
+  { name: "Irene Goodwin" },
+  { name: "Janine Riley" },
+  { name: "Jason van Wyngaard" },
+  { name: "Jo-Anne" },
+];
+async function ensureCaptainPinSentBackfill(): Promise<void> {
+  const when = new Date("2026-05-21T12:00:00Z");
+  for (const { name } of PIN_SENT_BACKFILL) {
+    await db
+      .update(captainProfilesTable)
+      .set({ pinSentAt: when })
+      .where(and(eq(captainProfilesTable.name, name), isNull(captainProfilesTable.pinSentAt)));
   }
 }
 
@@ -443,6 +461,9 @@ export async function seedIfEmpty(): Promise<void> {
 
     // Seed per-street household targets (only if still at the prior default of 30 — never overwrites admin edits).
     try { await ensureStreetTargets(); } catch (err) { logger.warn({ err }, "Street target seeding failed"); }
+
+    // Backfill pin_sent_at for captains whose PINs were sent manually before the button persisted state.
+    try { await ensureCaptainPinSentBackfill(); } catch (err) { logger.warn({ err }, "PIN-sent backfill failed"); }
 
     // Run AFTER backfill so this overrides any small-street re-fill of Paul's phone.
     const corrections = await correctKnownBadPhones();
