@@ -250,6 +250,26 @@ export default function Admin() {
     return { dupCaptainIds: ids, dupCount: ids.size };
   }, [captains]);
 
+  const [captainSearch, setCaptainSearch] = useState("");
+  const [captainStatusFilter, setCaptainStatusFilter] = useState<"all" | "Active Captain" | "Pending / New Volunteer" | "Unassigned">("all");
+  const filteredCaptains = useMemo(() => {
+    const q = captainSearch.trim().toLowerCase();
+    return captains.filter(c => {
+      if (captainStatusFilter !== "all") {
+        if (captainStatusFilter === "Unassigned") {
+          const isUnassigned = !c.captain || c.captain.trim().toLowerCase() === "unassigned";
+          if (!isUnassigned) return false;
+        } else if (c.captainStatus !== captainStatusFilter) {
+          return false;
+        }
+      }
+      if (!q) return true;
+      const hay = [c.captain, c.street, c.phone, c.email].filter(Boolean).join(" ").toLowerCase();
+      return hay.includes(q);
+    });
+  }, [captains, captainSearch, captainStatusFilter]);
+  const filtersActive = captainSearch.trim() !== "" || captainStatusFilter !== "all";
+
   const { data: commitments = [], isLoading: commitmentsLoading } = useQuery<Commitment[]>({
     queryKey: ["commitments"],
     queryFn: () =>
@@ -1002,6 +1022,56 @@ export default function Admin() {
               </p>
             </CardHeader>
             <CardContent>
+              <div className="mb-4 space-y-2" data-testid="captain-filters">
+                <div className="flex flex-col sm:flex-row gap-2">
+                  <div className="relative flex-1">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
+                    <Input
+                      type="text"
+                      value={captainSearch}
+                      onChange={e => setCaptainSearch(e.target.value)}
+                      placeholder="Search by name, street or phone..."
+                      className="pl-9 pr-9 bg-background border-border"
+                      data-testid="input-captain-search"
+                    />
+                    {captainSearch && (
+                      <button
+                        type="button"
+                        onClick={() => setCaptainSearch("")}
+                        className="absolute right-2 top-1/2 -translate-y-1/2 h-6 w-6 inline-flex items-center justify-center rounded text-muted-foreground hover:text-foreground hover:bg-muted/50"
+                        title="Clear search"
+                        aria-label="Clear search"
+                      >
+                        <span className="text-lg leading-none">×</span>
+                      </button>
+                    )}
+                  </div>
+                  <select
+                    value={captainStatusFilter}
+                    onChange={e => setCaptainStatusFilter(e.target.value as typeof captainStatusFilter)}
+                    className="h-10 rounded-md border border-border bg-background px-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring sm:w-56"
+                    data-testid="select-captain-status-filter"
+                  >
+                    <option value="all">All statuses</option>
+                    <option value="Active Captain">Active Captain</option>
+                    <option value="Pending / New Volunteer">Pending / New Volunteer</option>
+                    <option value="Unassigned">Unassigned</option>
+                  </select>
+                  {filtersActive && (
+                    <Button
+                      variant="outline"
+                      onClick={() => { setCaptainSearch(""); setCaptainStatusFilter("all"); }}
+                      className="h-10 gap-1.5"
+                      data-testid="button-clear-captain-filters"
+                    >
+                      <span className="text-base leading-none">×</span> Clear
+                    </Button>
+                  )}
+                </div>
+                <p className="text-xs text-muted-foreground" data-testid="text-captain-result-count">
+                  Showing {filteredCaptains.length} of {captains.length} captains
+                </p>
+              </div>
               {dupCount > 0 && (
                 <div
                   className="mb-4 rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-300 flex items-start gap-2"
@@ -1030,7 +1100,19 @@ export default function Admin() {
                     <div className="col-span-2">Status</div>
                     <div className="col-span-2"></div>
                   </div>
-                  {captains.map(c => {
+                  {filteredCaptains.length === 0 && (
+                    <p className="text-sm text-muted-foreground px-4 py-6 text-center">
+                      No captains match your filters.{" "}
+                      <button
+                        type="button"
+                        onClick={() => { setCaptainSearch(""); setCaptainStatusFilter("all"); }}
+                        className="underline hover:text-foreground"
+                      >
+                        Clear filters
+                      </button>
+                    </p>
+                  )}
+                  {filteredCaptains.map(c => {
                     const edit = captainEdits[c.id] ?? {};
                     const isDirty = Object.keys(edit).length > 0;
                     const currentStatus = edit.status ?? c.status;
