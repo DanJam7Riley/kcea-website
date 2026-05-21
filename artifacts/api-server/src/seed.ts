@@ -81,6 +81,21 @@ async function ensureSchema(): Promise<void> {
   await db.execute(sql`ALTER TABLE street_captains ADD COLUMN IF NOT EXISTS welcomed_at timestamp`);
   await db.execute(sql`ALTER TABLE captain_profiles ADD COLUMN IF NOT EXISTS previous_login_at timestamp`);
   await db.execute(sql`ALTER TABLE captain_profiles ADD COLUMN IF NOT EXISTS pin_sent_at timestamp`);
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS pledges (
+      id serial PRIMARY KEY,
+      full_name text NOT NULL,
+      phone text NOT NULL,
+      email text NOT NULL,
+      amount integer NOT NULL,
+      is_resident boolean NOT NULL DEFAULT false,
+      street text,
+      house_number text,
+      message text,
+      commitment_id integer,
+      created_at timestamp NOT NULL DEFAULT now()
+    )
+  `);
   await db.execute(sql`ALTER TABLE street_captains ADD COLUMN IF NOT EXISTS target_households integer NOT NULL DEFAULT 30`);
   await db.execute(sql`
     CREATE TABLE IF NOT EXISTS captain_resident_contacts (

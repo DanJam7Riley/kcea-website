@@ -3,7 +3,7 @@ import { motion } from "framer-motion";
 import { useQuery } from "@tanstack/react-query";
 import { 
   ChevronDown, Check, AlertCircle, Mail, MapPin, Phone, 
-  TrendingUp, Shield, Users, Menu, X, Search, Loader2
+  TrendingUp, Shield, Users, Menu, X, Search, Loader2, Heart
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -154,6 +154,12 @@ export default function Home() {
   const { data: captains = DEFAULT_CAPTAINS } = useQuery<StreetCaptain[]>({
     queryKey: ["captains"],
     queryFn: () => fetch(`${BASE}/api/captains`).then(r => r.json()),
+    staleTime: 30_000,
+  });
+
+  const { data: pledgeTotal } = useQuery<{ total: number }>({
+    queryKey: ["pledge-total"],
+    queryFn: () => fetch(`${BASE}/api/pledges/total`).then(r => r.json()),
     staleTime: 30_000,
   });
 
@@ -312,6 +318,9 @@ export default function Home() {
               <Button onClick={() => scrollTo('commit')} data-testid="button-hero-commit" size="lg" className="bg-primary text-primary-foreground hover:bg-primary/90 gap-2">
                 Commit Your Household
               </Button>
+              <Button asChild data-testid="button-hero-pledge" size="lg" variant="outline" className="border-primary/40 text-primary hover:bg-primary/10 gap-2">
+                <a href={`${BASE}/pledge`}><Heart className="h-4 w-4" /> Make a Pledge</a>
+              </Button>
               <Button onClick={() => scrollTo('faq')} data-testid="button-hero-faq" size="lg" variant="outline" className="border-card-border hover:bg-card">
                 Read the FAQ
               </Button>
@@ -388,6 +397,20 @@ export default function Home() {
               </CardContent>
             </Card>
           </div>
+
+          {(pledgeTotal?.total ?? 0) > 0 && (
+            <div className="flex justify-center">
+              <a
+                href={`${BASE}/pledge`}
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary/10 border border-primary/20 text-primary text-sm font-medium hover:bg-primary/15 transition-colors"
+                data-testid="link-pledge-total"
+              >
+                <Heart className="h-4 w-4" />
+                {fmtRand(pledgeTotal?.total ?? 0)} pledged in donations
+                <span className="text-muted-foreground font-normal">— add yours</span>
+              </a>
+            </div>
+          )}
 
           <Card className="bg-card border-card-border">
             <CardContent className="p-8 space-y-6">

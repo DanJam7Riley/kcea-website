@@ -116,6 +116,24 @@ export const propertyNotesTable = pgTable("property_notes", {
 });
 export type PropertyNote = typeof propertyNotesTable.$inferSelect;
 
+export const pledgesTable = pgTable("pledges", {
+  id: serial("id").primaryKey(),
+  fullName: text("full_name").notNull(),
+  phone: text("phone").notNull(),
+  email: text("email").notNull(),
+  amount: integer("amount").notNull(),
+  isResident: boolean("is_resident").notNull().default(false),
+  street: text("street"),
+  houseNumber: text("house_number"),
+  message: text("message"),
+  commitmentId: integer("commitment_id"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const insertPledgeSchema = createInsertSchema(pledgesTable).omit({ id: true, createdAt: true, commitmentId: true });
+export type Pledge = typeof pledgesTable.$inferSelect;
+export type InsertPledge = z.infer<typeof insertPledgeSchema>;
+
 export const streetHousesTable = pgTable("street_houses", {
   id: serial("id").primaryKey(),
   street: text("street").notNull(),

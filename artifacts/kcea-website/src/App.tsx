@@ -7,6 +7,7 @@ import Home from "@/pages/Home";
 import Admin from "@/pages/Admin";
 import CaptainPortal from "@/pages/CaptainPortal";
 import Update from "@/pages/Update";
+import Pledge from "@/pages/Pledge";
 
 const queryClient = new QueryClient();
 
@@ -18,6 +19,7 @@ function Router() {
       <Route path="/captain" component={CaptainPortal} />
       <Route path="/captain-login" component={CaptainPortal} />
       <Route path="/update" component={Update} />
+      <Route path="/pledge" component={Pledge} />
       <Route component={NotFound} />
     </Switch>
   );

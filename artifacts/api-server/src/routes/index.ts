@@ -3,6 +3,7 @@ import healthRouter from "./health";
 import statsRouter from "./stats";
 import captainsRouter from "./captains";
 import commitmentsRouter from "./commitments";
+import pledgesRouter from "./pledges";
 import volunteersRouter from "./volunteers";
 import captainPortalRouter from "./captain-portal";
 import settingsRouter from "./settings";
@@ -16,6 +17,7 @@ router.use(settingsRouter);
 router.use(adminMigrateRouter);
 router.use(captainsRouter);
 router.use(commitmentsRouter);
+router.use(pledgesRouter);
 router.use(volunteersRouter);
 router.use(captainPortalRouter);
 

@@ -2,7 +2,7 @@ import { useState, useRef, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Shield, Save, LogIn, AlertTriangle, CheckCircle, Check, Key, Pencil,
-  Trash2, Download, Upload, Users, ClipboardList, BarChart3, Search, MessageSquare, RefreshCw, Phone, ExternalLink, Settings as SettingsIcon
+  Trash2, Download, Upload, Users, ClipboardList, BarChart3, Search, MessageSquare, RefreshCw, Phone, ExternalLink, Settings as SettingsIcon, Heart, Mail
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -14,8 +14,22 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 
 const STATUS_OPTIONS = ["Strong", "Good", "Solid", "Steady", "In Progress", "Re-engaged", "Critical"];
-const TABS = ["submissions", "stats", "captains", "incomplete", "captain-mgmt", "settings"] as const;
+const TABS = ["submissions", "stats", "captains", "incomplete", "captain-mgmt", "pledges", "settings"] as const;
 type Tab = typeof TABS[number];
+
+interface PledgeRow {
+  id: number;
+  fullName: string;
+  phone: string;
+  email: string;
+  amount: number;
+  isResident: boolean;
+  street: string | null;
+  houseNumber: string | null;
+  message: string | null;
+  commitmentId: number | null;
+  createdAt: string;
+}
 
 interface IncompleteCommitment {
   id: number;
@@ -221,6 +235,28 @@ export default function Admin() {
         return r.json();
       }),
     enabled: authed,
+  });
+
+  const { data: pledges = [], isLoading: pledgesLoading } = useQuery<PledgeRow[]>({
+    queryKey: ["pledges"],
+    queryFn: () =>
+      fetch(`${BASE}/api/pledges`, { headers: authHeaders }).then(async r => {
+        if (!r.ok) throw new Error("Unauthorized");
+        return r.json();
+      }),
+    enabled: authed && activeTab === "pledges",
+  });
+
+  const deletePledge = useMutation({
+    mutationFn: (id: number) =>
+      fetch(`${BASE}/api/pledges/${id}`, { method: "DELETE", headers: authHeaders }).then(async r => {
+        if (!r.ok) throw new Error(await r.text());
+        return r.json();
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["pledges"] });
+      qc.invalidateQueries({ queryKey: ["pledge-total"] });
+    },
   });
 
   const { data: incompleteRecords = [], isLoading: incompleteLoading } = useQuery<IncompleteCommitment[]>({
@@ -673,7 +709,7 @@ export default function Admin() {
 
         {/* Tabs */}
         <div className="flex gap-1 border-b border-border">
-          {([ ["submissions", ClipboardList, "Submissions"], ["stats", BarChart3, "Stats"], ["captains", Users, "Captains"], ["incomplete", AlertTriangle, "Incomplete"], ["captain-mgmt", Key, "Captain Portal"], ["settings", SettingsIcon, "Settings"] ] as const).map(([tab, Icon, label]) => (
+          {([ ["submissions", ClipboardList, "Submissions"], ["stats", BarChart3, "Stats"], ["captains", Users, "Captains"], ["incomplete", AlertTriangle, "Incomplete"], ["captain-mgmt", Key, "Captain Portal"], ["pledges", Heart, "Pledges"], ["settings", SettingsIcon, "Settings"] ] as const).map(([tab, Icon, label]) => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
@@ -1429,6 +1465,94 @@ export default function Admin() {
             </Card>
 
           </div>
+        )}
+
+        {/* Pledges Tab */}
+        {activeTab === "pledges" && (
+          <Card className="bg-card border-card-border">
+            <CardHeader className="flex flex-row items-center justify-between gap-4 pb-4">
+              <div>
+                <CardTitle className="text-xl flex items-center gap-2"><Heart className="h-5 w-5 text-primary" /> Pledges</CardTitle>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Total pledged: <span className="font-bold text-primary">R{pledges.reduce((s, p) => s + p.amount, 0).toLocaleString("en-ZA")}</span>
+                  {" · "}{pledges.length} pledge{pledges.length === 1 ? "" : "s"}
+                </p>
+              </div>
+            </CardHeader>
+            <CardContent>
+              {pledgesLoading ? (
+                <p className="text-sm text-muted-foreground">Loading pledges...</p>
+              ) : pledges.length === 0 ? (
+                <p className="text-sm text-muted-foreground py-8 text-center">No pledges yet. Share the pledge link with the community.</p>
+              ) : (
+                <div className="space-y-2">
+                  {pledges.map(p => {
+                    const phoneDigits = p.phone.replace(/[\s()\-+]/g, "");
+                    const normalized = phoneDigits.startsWith("0") ? "27" + phoneDigits.slice(1) : phoneDigits;
+                    const waUrl = /^\d{10,15}$/.test(normalized)
+                      ? `https://wa.me/${normalized}?text=${encodeURIComponent(`Hi ${p.fullName.split(/\s+/)[0]}, thank you for your pledge of R${p.amount.toLocaleString("en-ZA")} to the KCEA project. We'll be in touch about payment details.`)}`
+                      : null;
+                    return (
+                      <div key={p.id} className="rounded-lg border border-card-border p-4 space-y-2" data-testid={`pledge-row-${p.id}`}>
+                        <div className="flex flex-wrap items-start justify-between gap-3">
+                          <div className="space-y-1">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="font-semibold">{p.fullName}</span>
+                              <Badge className="bg-primary/20 text-primary border-primary/20 text-xs" variant="outline">
+                                R{p.amount.toLocaleString("en-ZA")}
+                              </Badge>
+                              {p.isResident ? (
+                                <Badge className="bg-blue-500/20 text-blue-400 border-blue-500/20 text-xs" variant="outline">
+                                  Resident — {p.street} {p.houseNumber}
+                                </Badge>
+                              ) : (
+                                <Badge className="bg-muted text-muted-foreground border-transparent text-xs" variant="outline">Non-resident</Badge>
+                              )}
+                              {p.commitmentId && (
+                                <Badge className="bg-green-500/20 text-green-400 border-green-500/20 text-xs" variant="outline">
+                                  Linked to commitment #{p.commitmentId}
+                                </Badge>
+                              )}
+                            </div>
+                            <div className="text-xs text-muted-foreground flex flex-wrap gap-x-4 gap-y-1">
+                              <span className="inline-flex items-center gap-1"><Phone className="h-3 w-3" /> {p.phone}</span>
+                              <span className="inline-flex items-center gap-1"><Mail className="h-3 w-3" /> {p.email}</span>
+                              <span>{new Date(p.createdAt).toLocaleString("en-ZA", { day: "2-digit", month: "short", year: "numeric" })}</span>
+                            </div>
+                            {p.message && (
+                              <p className="text-xs text-muted-foreground italic pt-1">"{p.message}"</p>
+                            )}
+                          </div>
+                          <div className="flex gap-2 shrink-0">
+                            {waUrl && (
+                              <Button asChild size="sm" variant="outline" className="gap-1.5">
+                                <a href={waUrl} target="_blank" rel="noopener noreferrer" data-testid={`wa-pledge-${p.id}`}>
+                                  <MessageSquare className="h-3.5 w-3.5" /> Thank
+                                </a>
+                              </Button>
+                            )}
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="text-red-400 border-red-400/30 hover:bg-red-500/10"
+                              onClick={() => {
+                                if (confirm(`Delete pledge from ${p.fullName} (R${p.amount.toLocaleString("en-ZA")})?`)) {
+                                  deletePledge.mutate(p.id);
+                                }
+                              }}
+                              data-testid={`delete-pledge-${p.id}`}
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </Button>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </CardContent>
+          </Card>
         )}
 
         {/* Settings Tab */}
