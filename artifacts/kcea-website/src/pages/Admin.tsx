@@ -227,6 +227,29 @@ export default function Admin() {
     enabled: authed,
   });
 
+  // Duplicate detection — flag any captain row whose name or street appears more than once.
+  // Streets with co-captains will legitimately show up here; the banner explains why so admins
+  // can decide whether to merge/delete.
+  const { dupCaptainIds, dupCount } = useMemo(() => {
+    const nameCounts = new Map<string, number>();
+    const streetCounts = new Map<string, number>();
+    for (const c of captains) {
+      const n = (c.captain || "").trim().toLowerCase();
+      const s = (c.street || "").trim().toLowerCase();
+      if (n && n !== "unassigned") nameCounts.set(n, (nameCounts.get(n) ?? 0) + 1);
+      if (s) streetCounts.set(s, (streetCounts.get(s) ?? 0) + 1);
+    }
+    const ids = new Set<number>();
+    for (const c of captains) {
+      const n = (c.captain || "").trim().toLowerCase();
+      const s = (c.street || "").trim().toLowerCase();
+      const nameDup = n && n !== "unassigned" && (nameCounts.get(n) ?? 0) > 1;
+      const streetDup = s && (streetCounts.get(s) ?? 0) > 1;
+      if (nameDup || streetDup) ids.add(c.id);
+    }
+    return { dupCaptainIds: ids, dupCount: ids.size };
+  }, [captains]);
+
   const { data: commitments = [], isLoading: commitmentsLoading } = useQuery<Commitment[]>({
     queryKey: ["commitments"],
     queryFn: () =>
@@ -334,6 +357,8 @@ export default function Admin() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["captain-profiles"] }),
   });
 
+  const [welcomeModalId, setWelcomeModalId] = useState<number | null>(null);
+
   const toggleCaptainStatus = useMutation({
     mutationFn: ({ id, captainStatus }: { id: number; captainStatus: string }) =>
       fetch(`${BASE}/api/captains/${id}`, {
@@ -341,6 +366,18 @@ export default function Admin() {
         headers: { "Content-Type": "application/json", ...authHeaders },
         body: JSON.stringify({ captainStatus }),
       }).then(async r => { if (!r.ok) throw new Error(await r.text()); return r.json(); }),
+    onSuccess: (_data, vars) => {
+      qc.invalidateQueries({ queryKey: ["captains"] });
+      if (vars.captainStatus === "Active Captain") {
+        setWelcomeModalId(vars.id);
+      }
+    },
+  });
+
+  const deleteCaptain = useMutation({
+    mutationFn: (id: number) =>
+      fetch(`${BASE}/api/captains/${id}`, { method: "DELETE", headers: authHeaders })
+        .then(async r => { if (!r.ok) throw new Error(await r.text()); return r.json(); }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["captains"] }),
   });
 
@@ -965,6 +1002,21 @@ export default function Admin() {
               </p>
             </CardHeader>
             <CardContent>
+              {dupCount > 0 && (
+                <div
+                  className="mb-4 rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-300 flex items-start gap-2"
+                  data-testid="banner-duplicate-captains"
+                >
+                  <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
+                  <div>
+                    <p className="font-semibold">{dupCount} duplicate {dupCount === 1 ? "entry" : "entries"} found</p>
+                    <p className="text-xs text-red-300/80 mt-0.5">
+                      Rows sharing a name or street with another row are highlighted in red. Co-captain streets will appear here too —
+                      review each one and delete any genuine duplicates using the trash button.
+                    </p>
+                  </div>
+                </div>
+              )}
               {captainsLoading ? (
                 <p className="text-muted-foreground text-sm">Loading…</p>
               ) : (
@@ -986,8 +1038,9 @@ export default function Admin() {
                     const wasSaved = savedCaptains.has(c.id);
                     const isActive = c.captainStatus === "Active Captain";
                     const isToggling = toggleCaptainStatus.isPending && (toggleCaptainStatus.variables as { id: number } | undefined)?.id === c.id;
+                    const isDup = dupCaptainIds.has(c.id);
                     return (
-                      <div key={c.id} className={`grid grid-cols-12 gap-3 items-start p-4 rounded-lg bg-background/50 border transition-colors ${isActive ? "border-border" : "border-amber-500/20"}`}>
+                      <div key={c.id} className={`grid grid-cols-12 gap-3 items-start p-4 rounded-lg bg-background/50 border transition-colors ${isDup ? "border-red-500/50 bg-red-500/5" : isActive ? "border-border" : "border-amber-500/20"}`} data-testid={`captain-row-${c.id}`}>
                         <div className="col-span-2 font-semibold text-sm pt-1">{c.street}</div>
                         <div className="col-span-2">
                           <Input
@@ -1092,6 +1145,21 @@ export default function Admin() {
                               {currentStatus}
                             </Badge>
                           )}
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="h-8 w-8 p-0 text-red-400 border-red-400/30 hover:bg-red-500/10 ml-auto"
+                            disabled={deleteCaptain.isPending}
+                            onClick={() => {
+                              if (confirm(`Are you sure you want to delete ${c.captain || "this captain"} from ${c.street}? This cannot be undone.`)) {
+                                deleteCaptain.mutate(c.id);
+                              }
+                            }}
+                            title="Delete captain"
+                            data-testid={`delete-captain-${c.id}`}
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </Button>
                         </div>
                       </div>
                     );
@@ -1617,6 +1685,76 @@ export default function Admin() {
         )}
 
       </main>
+
+      {(() => {
+        const wc = welcomeModalId != null ? captains.find(c => c.id === welcomeModalId) : null;
+        const phoneDigits = (wc?.phone ?? "").replace(/[\s()\-+]/g, "");
+        const normalized = phoneDigits.startsWith("0") ? "27" + phoneDigits.slice(1) : phoneDigits;
+        const phoneOk = /^\d{10,15}$/.test(normalized);
+        const pinOk = !!(wc?.pin && wc.pin.trim());
+        const welcomeMsg = wc
+          ? `Hi ${wc.captain}, welcome to the KCEA Street Captain team! 🎉 You are now the official captain for ${wc.street}. Your captain portal login: https://attached-assets-janineriley.replit.app/captain-login | PIN: ${wc.pin ?? ""} | Keep your PIN private. For help, WhatsApp Janine: ${adminWhatsapp}`
+          : "";
+        const waUrl = phoneOk && pinOk ? `https://wa.me/${normalized}?text=${encodeURIComponent(welcomeMsg)}` : null;
+        return (
+          <Dialog open={welcomeModalId != null} onOpenChange={(o) => { if (!o) setWelcomeModalId(null); }}>
+            <DialogContent className="max-w-lg">
+              <DialogHeader>
+                <DialogTitle className="flex items-center gap-2">
+                  <MessageSquare className="h-5 w-5 text-green-400" /> Welcome new Active Captain
+                </DialogTitle>
+              </DialogHeader>
+              {wc && (
+                <div className="space-y-4">
+                  <div className="rounded-md bg-background/50 border border-border p-3 text-sm space-y-1">
+                    <p><span className="text-muted-foreground">Captain:</span> <span className="font-semibold">{wc.captain}</span> — {wc.street}</p>
+                    <p><span className="text-muted-foreground">Phone:</span> {wc.phone ? <span className="font-mono">{wc.phone}</span> : <span className="text-red-400">Missing</span>}</p>
+                    <p><span className="text-muted-foreground">PIN:</span> {pinOk ? <span className="font-mono">{wc.pin}</span> : <span className="text-red-400">Not set</span>}</p>
+                  </div>
+
+                  {!pinOk ? (
+                    <div className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2.5 text-sm text-amber-300 space-y-1">
+                      <p className="font-semibold flex items-center gap-1.5"><AlertTriangle className="h-4 w-4" /> Set PIN first</p>
+                      <p className="text-xs text-amber-200/80">
+                        This captain doesn't have a PIN yet, so they can't log into the portal.
+                        Go to the <span className="font-medium">Captain Portal</span> tab and set their PIN before sending the welcome message.
+                      </p>
+                    </div>
+                  ) : !phoneOk ? (
+                    <div className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2.5 text-sm text-amber-300">
+                      <p className="font-semibold flex items-center gap-1.5"><AlertTriangle className="h-4 w-4" /> Phone number missing or invalid</p>
+                      <p className="text-xs text-amber-200/80 mt-1">Add a valid phone number to this captain row before sending.</p>
+                    </div>
+                  ) : (
+                    <div className="rounded-md border border-border bg-background/50 p-3 text-xs whitespace-pre-wrap leading-relaxed">
+                      {welcomeMsg}
+                    </div>
+                  )}
+                </div>
+              )}
+              <DialogFooter className="gap-2">
+                <Button variant="outline" onClick={() => setWelcomeModalId(null)} data-testid="button-welcome-close">Close</Button>
+                {waUrl && (
+                  <Button asChild className="bg-green-600 hover:bg-green-700 text-white gap-1.5">
+                    <a
+                      href={waUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      onClick={() => {
+                        if (wc) markWelcomed.mutate(wc.id);
+                        setWelcomeModalId(null);
+                      }}
+                      data-testid="button-welcome-send"
+                    >
+                      <MessageSquare className="h-4 w-4" /> Send via WhatsApp
+                    </a>
+                  </Button>
+                )}
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+        );
+      })()}
 
       <Dialog open={!!editingCommitment} onOpenChange={(o) => { if (!o) setEditingCommitment(null); }}>
         <DialogContent className="bg-card border-border max-w-lg">

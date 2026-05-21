@@ -180,4 +180,30 @@ router.put("/captains/:id", async (req, res) => {
   }
 });
 
+router.delete("/captains/:id", async (req, res) => {
+  if (!isAdmin(req)) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+  const id = parseInt(req.params.id, 10);
+  if (isNaN(id)) {
+    res.status(400).json({ error: "Invalid id" });
+    return;
+  }
+  try {
+    const [deleted] = await db
+      .delete(streetCaptainsTable)
+      .where(eq(streetCaptainsTable.id, id))
+      .returning();
+    if (!deleted) {
+      res.status(404).json({ error: "Captain not found" });
+      return;
+    }
+    res.json({ success: true });
+  } catch (err) {
+    req.log.error(err);
+    res.status(500).json({ error: "Failed to delete captain" });
+  }
+});
+
 export default router;
