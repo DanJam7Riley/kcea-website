@@ -1,7 +1,8 @@
 import { useState, useEffect } from "react";
 import {
   Shield, LogOut, CheckCircle, XCircle, Plus, Save,
-  MessageSquare, Home, ArrowLeft, Lock, Sparkles
+  MessageSquare, Home, ArrowLeft, Lock, Sparkles,
+  ChevronDown, ChevronUp, Phone, Mail, Calendar, MapPin
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -23,6 +24,29 @@ interface CommittedProperty {
   houseNumber: string;
   commitmentType: string;
   paymentConfirmed: boolean;
+  phone: string;
+  email: string;
+  submittedAt: string;
+}
+
+function ContactDetails({ fullName, street, houseNumber, phone, email, submittedAt }: {
+  fullName: string; street: string; houseNumber: string;
+  phone: string; email: string; submittedAt: string;
+}) {
+  const phoneTrim = (phone ?? "").trim();
+  const emailTrim = (email ?? "").trim();
+  const dateStr = submittedAt
+    ? new Date(submittedAt).toLocaleDateString("en-ZA", { day: "2-digit", month: "short", year: "numeric" })
+    : "—";
+  return (
+    <div className="mt-2 pt-2 border-t border-border/40 space-y-1.5 text-xs">
+      <div className="flex items-center gap-2"><MapPin className="h-3 w-3 text-muted-foreground shrink-0" /><span className="font-medium">{fullName}</span><span className="text-muted-foreground">— {street} No. {houseNumber}</span></div>
+      <div className="flex items-center gap-2"><Phone className="h-3 w-3 text-muted-foreground shrink-0" />{phoneTrim ? <span className="break-all">{phoneTrim}</span> : <span className="text-red-400 font-medium">Missing</span>}</div>
+      <div className="flex items-center gap-2"><Mail className="h-3 w-3 text-muted-foreground shrink-0" />{emailTrim ? <span className="break-all">{emailTrim}</span> : <span className="text-red-400 font-medium">Missing</span>}</div>
+      <div className="flex items-center gap-2"><Calendar className="h-3 w-3 text-muted-foreground shrink-0" /><span className="text-muted-foreground">Submitted {dateStr}</span></div>
+      <p className="text-[10px] text-muted-foreground italic pt-0.5">View only. Contact admin to correct any details.</p>
+    </div>
+  );
 }
 
 interface NewSubmission {
@@ -32,6 +56,7 @@ interface NewSubmission {
   houseNumber: string;
   commitmentType: string;
   phone: string;
+  email: string;
   submittedAt: string;
 }
 
@@ -159,6 +184,12 @@ export default function CaptainPortal() {
   const [dashboard, setDashboard] = useState<DashboardData | null>(null);
   const [dashLoading, setDashLoading] = useState(false);
 
+  const [expandedDetails, setExpandedDetails] = useState<Set<string>>(new Set());
+  const toggleDetails = (key: string) => setExpandedDetails(prev => {
+    const next = new Set(prev);
+    if (next.has(key)) next.delete(key); else next.add(key);
+    return next;
+  });
   const [expandedNotes, setExpandedNotes] = useState<Set<string>>(new Set());
   const [noteEdits, setNoteEdits] = useState<Record<string, string>>({});
   const [savingNotes, setSavingNotes] = useState<Set<string>>(new Set());
@@ -453,7 +484,8 @@ export default function CaptainPortal() {
                 const waUrl = makeWaUrl(s.phone, msg);
                 const contacted = (dashboard.contactedResidents ?? []).find(c => c.commitmentId === s.id);
                 return (
-                  <div key={s.id} className="p-3 rounded-lg bg-primary/5 border border-primary/20 flex items-start justify-between gap-3">
+                  <div key={s.id} className="p-3 rounded-lg bg-primary/5 border border-primary/20">
+                    <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
                       <p className="font-medium text-sm truncate">{s.fullName}</p>
                       <p className="text-xs text-muted-foreground">
@@ -462,6 +494,14 @@ export default function CaptainPortal() {
                           {new Date(s.submittedAt).toLocaleDateString("en-ZA", { day: "2-digit", month: "short" })}
                         </span>
                       </p>
+                      <button
+                        type="button"
+                        onClick={() => toggleDetails(`new:${s.id}`)}
+                        className="mt-1 inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-primary transition-colors"
+                      >
+                        {expandedDetails.has(`new:${s.id}`) ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+                        Details
+                      </button>
                     </div>
                     <div className="flex flex-col items-end gap-1 shrink-0">
                       <Badge
@@ -505,6 +545,17 @@ export default function CaptainPortal() {
                         <span className="text-[10px] text-muted-foreground italic">No phone</span>
                       )}
                     </div>
+                    </div>
+                    {expandedDetails.has(`new:${s.id}`) && (
+                      <ContactDetails
+                        fullName={s.fullName}
+                        street={s.street}
+                        houseNumber={s.houseNumber}
+                        phone={s.phone}
+                        email={s.email}
+                        submittedAt={s.submittedAt}
+                      />
+                    )}
                   </div>
                 );
               })}
@@ -559,6 +610,14 @@ export default function CaptainPortal() {
                       <div className="min-w-0">
                         <p className="font-medium text-sm truncate">{c.fullName}</p>
                         <p className="text-xs text-muted-foreground">{c.street} No. {c.houseNumber}</p>
+                        <button
+                          type="button"
+                          onClick={() => toggleDetails(`committed:${c.id}`)}
+                          className="mt-1 inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-primary transition-colors"
+                        >
+                          {expandedDetails.has(`committed:${c.id}`) ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+                          Details
+                        </button>
                       </div>
                       <div className="flex flex-col items-end gap-1 shrink-0">
                         <Badge
@@ -576,6 +635,16 @@ export default function CaptainPortal() {
                         )}
                       </div>
                     </div>
+                    {expandedDetails.has(`committed:${c.id}`) && (
+                      <ContactDetails
+                        fullName={c.fullName}
+                        street={c.street}
+                        houseNumber={c.houseNumber}
+                        phone={c.phone}
+                        email={c.email}
+                        submittedAt={c.submittedAt}
+                      />
+                    )}
                     <PropertyNoteField street={c.street} houseNumber={c.houseNumber} {...noteProps} />
                   </div>
                 ))
