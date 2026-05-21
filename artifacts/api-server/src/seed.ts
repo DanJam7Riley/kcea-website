@@ -418,6 +418,42 @@ async function correctKnownBadPhones(): Promise<{ jasonFixed: number; paulBlanke
   return { jasonFixed, paulBlanked };
 }
 
+/**
+ * Idempotent dedupe: for any street where multiple captain rows exist AND at least one of them
+ * is "empty" (Unassigned or blank captain name), delete the empty row(s) — keep the named ones.
+ * Legitimate co-captain streets (all rows have real names) are untouched.
+ */
+async function dedupeEmptyCaptainRows(): Promise<Array<{ id: number; street: string; captain: string }>> {
+  const all = await db.select({
+    id: streetCaptainsTable.id,
+    street: streetCaptainsTable.street,
+    captain: streetCaptainsTable.captain,
+  }).from(streetCaptainsTable);
+
+  const byStreet = new Map<string, typeof all>();
+  for (const r of all) {
+    const k = r.street.toLowerCase();
+    const arr = byStreet.get(k) ?? [];
+    arr.push(r);
+    byStreet.set(k, arr);
+  }
+
+  const toDelete: Array<{ id: number; street: string; captain: string }> = [];
+  for (const rows of byStreet.values()) {
+    if (rows.length < 2) continue;
+    const named = rows.filter(r => r.captain && r.captain.trim() && r.captain.trim().toLowerCase() !== "unassigned");
+    const empty = rows.filter(r => !r.captain || !r.captain.trim() || r.captain.trim().toLowerCase() === "unassigned");
+    if (named.length >= 1 && empty.length >= 1) {
+      toDelete.push(...empty);
+    }
+  }
+
+  for (const r of toDelete) {
+    await db.delete(streetCaptainsTable).where(eq(streetCaptainsTable.id, r.id));
+  }
+  return toDelete;
+}
+
 export async function seedIfEmpty(): Promise<void> {
   try {
     await ensureSchema();
@@ -479,6 +515,15 @@ export async function seedIfEmpty(): Promise<void> {
 
     // Backfill pin_sent_at for captains whose PINs were sent manually before the button persisted state.
     try { await ensureCaptainPinSentBackfill(); } catch (err) { logger.warn({ err }, "PIN-sent backfill failed"); }
+
+    // Remove duplicate captain rows: if a street has an Unassigned/empty row AND a named row,
+    // delete the Unassigned one. Co-captain streets (multiple named rows) are preserved.
+    try {
+      const removed = await dedupeEmptyCaptainRows();
+      if (removed.length > 0) {
+        logger.info({ removed }, "Removed duplicate Unassigned captain rows");
+      }
+    } catch (err) { logger.warn({ err }, "Captain dedupe failed"); }
 
     // Run AFTER backfill so this overrides any small-street re-fill of Paul's phone.
     const corrections = await correctKnownBadPhones();

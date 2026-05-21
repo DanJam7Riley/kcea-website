@@ -1106,11 +1106,23 @@ export default function Admin() {
                             {isToggling ? <RefreshCw className="h-3 w-3 animate-spin" /> : null}
                             {isActive ? "Active Captain" : "Pending / New Volunteer"}
                           </button>
-                          {c.phone && c.pin && c.email && (() => {
+                          {isActive && c.captain && c.captain.trim().toLowerCase() !== "unassigned" && (() => {
                             const welcomed = !!c.welcomedAt;
-                            const msg = `Hi ${c.captain}, you have been confirmed as Street Captain for ${c.street}! Welcome to the team 🎉\n\nYour Captain Portal login details:\n🌐 https://attached-assets-janineriley.replit.app/captain-login\n📱 Phone number: ${c.phone}\n🔐 PIN: ${c.pin}\n\nPlease keep your PIN private. You can use the portal to track commitment progress on your street at any time.\n\nQuestions? WhatsApp Janine on ${adminWhatsapp}.\n\n- KCEA Team`;
-                            const url = makeResidentWaUrl(c.phone, msg);
-                            if (!url) return null;
+                            const pinLine = c.pin ? `PIN: ${c.pin}` : "PIN: Your PIN will be sent shortly";
+                            const userLine = c.email ? `Username: ${c.email}` : `Username: ${c.phone ?? ""}`;
+                            const msg = `Hi ${c.captain}, you have been confirmed as Street Captain for ${c.street}!\n\nYour Captain Portal login:\nURL: https://attached-assets-janineriley.replit.app/captain-login\n${userLine}\n${pinLine}\n\nQuestions? WhatsApp Janine on ${adminWhatsapp}.\n- KCEA Team`;
+                            const url = c.phone ? makeResidentWaUrl(c.phone, msg) : null;
+                            if (!url) {
+                              return (
+                                <span
+                                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs border bg-amber-500/10 text-amber-400 border-amber-500/30"
+                                  title="Add a phone number to this captain to send the welcome message"
+                                >
+                                  <AlertTriangle className="h-3 w-3" />
+                                  No phone — add one before sending welcome
+                                </span>
+                              );
+                            }
                             return (
                               <a
                                 href={url}
@@ -1151,7 +1163,7 @@ export default function Admin() {
                             className="h-8 w-8 p-0 text-red-400 border-red-400/30 hover:bg-red-500/10 ml-auto"
                             disabled={deleteCaptain.isPending}
                             onClick={() => {
-                              if (confirm(`Are you sure you want to delete ${c.captain || "this captain"} from ${c.street}? This cannot be undone.`)) {
+                              if (confirm(`Delete ${c.captain || "this captain"} from ${c.street}? This cannot be undone.`)) {
                                 deleteCaptain.mutate(c.id);
                               }
                             }}
@@ -1692,10 +1704,12 @@ export default function Admin() {
         const normalized = phoneDigits.startsWith("0") ? "27" + phoneDigits.slice(1) : phoneDigits;
         const phoneOk = /^\d{10,15}$/.test(normalized);
         const pinOk = !!(wc?.pin && wc.pin.trim());
+        const pinLine = pinOk ? `PIN: ${wc!.pin}` : "PIN: Your PIN will be sent shortly";
+        const userLine = wc?.email ? `Username: ${wc.email}` : `Username: ${wc?.phone ?? ""}`;
         const welcomeMsg = wc
-          ? `Hi ${wc.captain}, welcome to the KCEA Street Captain team! 🎉 You are now the official captain for ${wc.street}. Your captain portal login: https://attached-assets-janineriley.replit.app/captain-login | PIN: ${wc.pin ?? ""} | Keep your PIN private. For help, WhatsApp Janine: ${adminWhatsapp}`
+          ? `Hi ${wc.captain}, you have been confirmed as Street Captain for ${wc.street}!\n\nYour Captain Portal login:\nURL: https://attached-assets-janineriley.replit.app/captain-login\n${userLine}\n${pinLine}\n\nQuestions? WhatsApp Janine on ${adminWhatsapp}.\n- KCEA Team`
           : "";
-        const waUrl = phoneOk && pinOk ? `https://wa.me/${normalized}?text=${encodeURIComponent(welcomeMsg)}` : null;
+        const waUrl = phoneOk ? `https://wa.me/${normalized}?text=${encodeURIComponent(welcomeMsg)}` : null;
         return (
           <Dialog open={welcomeModalId != null} onOpenChange={(o) => { if (!o) setWelcomeModalId(null); }}>
             <DialogContent className="max-w-lg">
@@ -1712,23 +1726,22 @@ export default function Admin() {
                     <p><span className="text-muted-foreground">PIN:</span> {pinOk ? <span className="font-mono">{wc.pin}</span> : <span className="text-red-400">Not set</span>}</p>
                   </div>
 
-                  {!pinOk ? (
-                    <div className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2.5 text-sm text-amber-300 space-y-1">
-                      <p className="font-semibold flex items-center gap-1.5"><AlertTriangle className="h-4 w-4" /> Set PIN first</p>
-                      <p className="text-xs text-amber-200/80">
-                        This captain doesn't have a PIN yet, so they can't log into the portal.
-                        Go to the <span className="font-medium">Captain Portal</span> tab and set their PIN before sending the welcome message.
-                      </p>
-                    </div>
-                  ) : !phoneOk ? (
+                  {!phoneOk ? (
                     <div className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2.5 text-sm text-amber-300">
-                      <p className="font-semibold flex items-center gap-1.5"><AlertTriangle className="h-4 w-4" /> Phone number missing or invalid</p>
+                      <p className="font-semibold flex items-center gap-1.5"><AlertTriangle className="h-4 w-4" /> No phone — add one before sending welcome</p>
                       <p className="text-xs text-amber-200/80 mt-1">Add a valid phone number to this captain row before sending.</p>
                     </div>
                   ) : (
-                    <div className="rounded-md border border-border bg-background/50 p-3 text-xs whitespace-pre-wrap leading-relaxed">
-                      {welcomeMsg}
-                    </div>
+                    <>
+                      {!pinOk && (
+                        <div className="rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs text-amber-300/90">
+                          No PIN set yet — the message will say "Your PIN will be sent shortly". Set the PIN in the Captain Portal tab to include it.
+                        </div>
+                      )}
+                      <div className="rounded-md border border-border bg-background/50 p-3 text-xs whitespace-pre-wrap leading-relaxed">
+                        {welcomeMsg}
+                      </div>
+                    </>
                   )}
                 </div>
               )}
