@@ -1,14 +1,16 @@
 // Public "Update My Details" self-service flow.
 //
 // Three endpoints, all unauthenticated to the user (verification is via
-// WhatsApp OTP -> short-lived signed session token):
+// email OTP -> short-lived signed session token):
 //
-//   POST /api/me/request-otp  { phone }
-//     - look up commitment by normalised phone
-//     - 4-digit OTP, 10-minute expiry, sent via WhatsApp
-//     - rate-limited: at most one OTP per 60s per phone
+//   POST /api/me/request-otp  { email }
+//     - look up commitment by normalised email
+//     - 4-digit OTP, 10-minute expiry, sent via email (Resend)
+//     - rate-limited: at most one OTP per 60s per email
+//     - enumeration-safe: always returns a uniform success response when
+//       the input is a well-formed email
 //
-//   POST /api/me/verify-otp   { phone, code }
+//   POST /api/me/verify-otp   { email, code }
 //     - on success: mark OTP consumed, return signed `sessionToken`
 //       plus the existing record details so the form can pre-fill
 //
@@ -20,7 +22,7 @@ import { Router } from "express";
 import { db, commitmentsTable, otpCodesTable } from "@workspace/db";
 import { eq, and, desc, isNull, gt } from "drizzle-orm";
 import { createHmac, randomInt, timingSafeEqual } from "node:crypto";
-import { sendWhatsappMessage } from "../lib/whatsapp";
+import { sendEmail } from "../lib/email";
 
 const router = Router();
 
@@ -41,16 +43,12 @@ const secret = (): string => {
   return s;
 };
 
-// Reduce a SA-style phone number to a stable lookup key:
-// last 9 digits after stripping a leading 27/0. Matches the commitments
-// schema's loosely-formatted phone column ("082 123 4567", "+27 82 ...", etc.).
-function phoneKey(raw: string): string {
-  const digits = (raw || "").replace(/\D/g, "");
-  if (!digits) return "";
-  let d = digits;
-  if (d.startsWith("27") && d.length > 9) d = d.slice(2);
-  if (d.startsWith("0")) d = d.slice(1);
-  return d.slice(-9);
+const EMAIL_RX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+// Normalise an email address for lookup/dedup: trim + lowercase. (We don't do
+// gmail dot/plus tricks — the stored address is what wins.)
+function emailKey(raw: string): string {
+  return (raw || "").trim().toLowerCase();
 }
 
 function hashCode(code: string): string {
@@ -90,46 +88,49 @@ const nameStreetKey = (name: string, street: string) =>
 const NOT_FOUND_MESSAGE =
   "We couldn't find your details. Please submit a new commitment form or contact your street captain.";
 const INVALID_OTP_MESSAGE = "Invalid or expired code. Please try again.";
+const UNIFORM_SENT_MESSAGE =
+  "If that email is on our list, we've sent a 4-digit code. Check your inbox — it expires in 10 minutes.";
 
 // ── POST /api/me/request-otp ─────────────────────────────────────────────
 router.post("/me/request-otp", async (req, res) => {
   const body = req.body as Record<string, unknown>;
-  const phone = typeof body.phone === "string" ? body.phone.trim() : "";
-  const key = phoneKey(phone);
-  if (!phone || key.length < 7) {
-    res.status(400).json({ error: "invalid_phone", message: "Please enter a valid phone number." });
+  const emailRaw = typeof body.email === "string" ? body.email : "";
+  const key = emailKey(emailRaw);
+  if (!key || !EMAIL_RX.test(key)) {
+    res.status(400).json({ error: "invalid_email", message: "Please enter a valid email address." });
     return;
   }
 
-  // Uniform response sent to the client regardless of whether the phone is
-  // on file — prevents enumerating which numbers have signed up. The actual
-  // "not found" feedback only reaches the resident through their inability
-  // to receive a code, plus the help text in the UI.
-  const uniformSuccess = {
-    ok: true,
-    message: "If that number is on our list, we've sent a 4-digit code via WhatsApp. It expires in 10 minutes.",
-  };
+  // Uniform response sent to the client regardless of whether the email is
+  // on file — prevents enumerating which addresses have signed up. Residents
+  // who entered an unknown address simply won't receive a code, and the help
+  // text on the page tells them what to do next.
+  const uniformSuccess = { ok: true, message: UNIFORM_SENT_MESSAGE };
 
   try {
-    // Find a commitment whose phone reduces to the same key. We do this in JS
-    // because stored phones use mixed formats.
+    // Find a commitment whose email matches (case-insensitive). Placeholder
+    // imported rows use "imported@kcea.local" — we exclude those so import
+    // stragglers can't be triggered by anyone typing that address.
     const all = await db
-      .select({ id: commitmentsTable.id, phone: commitmentsTable.phone })
+      .select({ id: commitmentsTable.id, email: commitmentsTable.email })
       .from(commitmentsTable);
-    const match = all.find(r => phoneKey(r.phone) === key);
+    const match = all.find(r => {
+      const ek = emailKey(r.email);
+      return ek === key && ek !== "imported@kcea.local";
+    });
     if (!match) {
-      req.log.info({ phoneKeyTail: key.slice(-4) }, "OTP requested for unknown phone — returning uniform success");
+      req.log.info({ emailDomain: key.split("@")[1] ?? "" }, "OTP requested for unknown email — returning uniform success");
       res.json(uniformSuccess);
       return;
     }
 
     // Rate limit: refuse if a non-consumed, non-expired OTP was issued in the
-    // last cooldown window for this phone. We still return the uniform shape
+    // last cooldown window for this email. We still return the uniform shape
     // so an attacker can't distinguish "rate-limited" from "not on list".
     const recent = await db
       .select({ createdAt: otpCodesTable.createdAt })
       .from(otpCodesTable)
-      .where(and(eq(otpCodesTable.phoneKey, key), isNull(otpCodesTable.consumedAt)))
+      .where(and(eq(otpCodesTable.emailKey, key), isNull(otpCodesTable.consumedAt)))
       .orderBy(desc(otpCodesTable.createdAt))
       .limit(1);
     if (recent.length > 0) {
@@ -145,25 +146,26 @@ router.post("/me/request-otp", async (req, res) => {
     const expiresAt = new Date(Date.now() + OTP_TTL_MS);
 
     await db.insert(otpCodesTable).values({
-      phoneKey: key,
+      emailKey: key,
       commitmentId: match.id,
       codeHash: hashCode(code),
       expiresAt,
     });
 
-    const messageBody = `Your KCEA verification code is ${code}. It expires in 10 minutes. Do not share this with anyone.`;
-    const sendResult = await sendWhatsappMessage(match.phone, messageBody);
+    const subject = "Your KCEA verification code";
+    const bodyText = `Your KCEA verification code is ${code}. It expires in 10 minutes. Do not share this with anyone.`;
+    const sendResult = await sendEmail(match.email, subject, bodyText);
 
     if (!sendResult.ok) {
-      req.log.warn({ commitmentId: match.id, reason: sendResult.reason }, "OTP WhatsApp send failed");
-      // For "not_configured" we surface the real problem — without WhatsApp
-      // the whole flow is unusable and silent success would just confuse
-      // residents waiting for a code that will never arrive.
+      req.log.warn({ commitmentId: match.id, reason: sendResult.reason }, "OTP email send failed");
+      // For "not_configured" we surface the real problem — without an email
+      // provider the whole flow is unusable and silent success would just
+      // confuse residents waiting for a code that will never arrive.
       if (sendResult.reason === "not_configured") {
         res.status(503).json({
-          error: "whatsapp_not_configured",
+          error: "email_not_configured",
           message:
-            "WhatsApp messaging isn't set up on the server yet. Please contact your street captain to update your details.",
+            "Email isn't set up on the server yet. Please contact your street captain to update your details.",
         });
         return;
       }
@@ -183,11 +185,11 @@ router.post("/me/request-otp", async (req, res) => {
 // ── POST /api/me/verify-otp ──────────────────────────────────────────────
 router.post("/me/verify-otp", async (req, res) => {
   const body = req.body as Record<string, unknown>;
-  const phone = typeof body.phone === "string" ? body.phone.trim() : "";
+  const emailRaw = typeof body.email === "string" ? body.email : "";
   const code = typeof body.code === "string" ? body.code.trim() : "";
-  const key = phoneKey(phone);
+  const key = emailKey(emailRaw);
 
-  if (!key || !/^\d{4}$/.test(code)) {
+  if (!key || !EMAIL_RX.test(key) || !/^\d{4}$/.test(code)) {
     res.status(400).json({ error: "invalid_input", message: INVALID_OTP_MESSAGE });
     return;
   }
@@ -198,7 +200,7 @@ router.post("/me/verify-otp", async (req, res) => {
       .from(otpCodesTable)
       .where(
         and(
-          eq(otpCodesTable.phoneKey, key),
+          eq(otpCodesTable.emailKey, key),
           isNull(otpCodesTable.consumedAt),
           gt(otpCodesTable.expiresAt, new Date()),
         ),
@@ -255,19 +257,13 @@ router.post("/me/verify-otp", async (req, res) => {
     const exp = Date.now() + SESSION_TTL_MS;
     const sessionToken = signSession(record.id, exp);
 
-    // Hide placeholder values that came from CSV imports so the form
-    // presents them as empty fields the resident can fill in.
-    const cleanEmail = record.email && record.email.toLowerCase() !== "imported@kcea.local" ? record.email : "";
-    const cleanPhone = record.phone && record.phone.trim() !== "-" ? record.phone : "";
-
     res.json({
       ok: true,
       sessionToken,
       sessionExpiresAt: exp,
       record: {
         fullName: record.fullName,
-        email: cleanEmail,
-        phone: cleanPhone,
+        email: record.email,
         street: record.street,
         houseNumber: record.houseNumber,
       },
@@ -295,6 +291,10 @@ router.post("/me/save", async (req, res) => {
 
   if (!fullName || !email || !street || !houseNumber) {
     res.status(400).json({ error: "missing_fields", message: "Please fill in all fields." });
+    return;
+  }
+  if (!EMAIL_RX.test(email)) {
+    res.status(400).json({ error: "invalid_email", message: "Please enter a valid email address." });
     return;
   }
 

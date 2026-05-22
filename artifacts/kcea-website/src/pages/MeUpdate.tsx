@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { CheckCircle2, AlertCircle, Loader2, Shield, MessageSquare, ArrowLeft } from "lucide-react";
+import { CheckCircle2, AlertCircle, Loader2, Shield, Mail, ArrowLeft } from "lucide-react";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 const SITE_NAME = "kcea.co.za";
@@ -20,19 +20,18 @@ const STREET_OPTIONS = [
   "Other",
 ];
 
-type Stage = "phone" | "code" | "edit" | "done";
+type Stage = "email" | "code" | "edit" | "done";
 
 interface RecordData {
   fullName: string;
   email: string;
-  phone: string;
   street: string;
   houseNumber: string;
 }
 
 export default function MeUpdate() {
-  const [stage, setStage] = useState<Stage>("phone");
-  const [phone, setPhone] = useState("");
+  const [stage, setStage] = useState<Stage>("email");
+  const [email, setEmail] = useState("");
   const [code, setCode] = useState("");
   const [sessionToken, setSessionToken] = useState("");
   const [record, setRecord] = useState<RecordData | null>(null);
@@ -45,17 +44,17 @@ export default function MeUpdate() {
   const requestOtp = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null); setInfo(null);
-    if (!phone.trim()) { setError("Please enter your phone number."); return; }
+    if (!email.trim()) { setError("Please enter your email address."); return; }
     setBusy(true);
     try {
       const res = await fetch(`${BASE}/api/me/request-otp`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ phone: phone.trim() }),
+        body: JSON.stringify({ email: email.trim() }),
       });
       const data = (await res.json().catch(() => ({}))) as { message?: string };
       if (!res.ok) { setError(data.message ?? "Something went wrong."); return; }
-      setInfo(data.message ?? "If that number is on our list, we've sent a 4-digit code via WhatsApp. It expires in 10 minutes.");
+      setInfo(data.message ?? "If that email is on our list, we've sent a 4-digit code. Check your inbox — it expires in 10 minutes.");
       setStage("code");
     } catch {
       setError("Network error. Please try again.");
@@ -73,7 +72,7 @@ export default function MeUpdate() {
       const res = await fetch(`${BASE}/api/me/verify-otp`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ phone: phone.trim(), code: code.trim() }),
+        body: JSON.stringify({ email: email.trim(), code: code.trim() }),
       });
       const data = (await res.json().catch(() => ({}))) as {
         message?: string; sessionToken?: string; record?: RecordData;
@@ -148,15 +147,15 @@ export default function MeUpdate() {
           <div className="text-center mb-8">
             <h1 className="text-3xl font-bold tracking-tight">Update My Details</h1>
             <p className="text-sm text-muted-foreground mt-2">
-              Already on the KCEA list? Verify with WhatsApp and update what's changed.
+              Already on the KCEA list? Verify with email and update what's changed.
             </p>
           </div>
 
           <Card className="bg-card border-card-border">
             <CardHeader>
               <CardTitle className="text-lg flex items-center gap-2">
-                {stage === "phone" && (<><MessageSquare className="h-4 w-4 text-primary" /> Step 1 — Verify your phone</>)}
-                {stage === "code" && (<><MessageSquare className="h-4 w-4 text-primary" /> Step 2 — Enter your code</>)}
+                {stage === "email" && (<><Mail className="h-4 w-4 text-primary" /> Step 1 — Verify your email</>)}
+                {stage === "code" && (<><Mail className="h-4 w-4 text-primary" /> Step 2 — Enter your code</>)}
                 {stage === "edit" && (<><CheckCircle2 className="h-4 w-4 text-primary" /> Step 3 — Update your details</>)}
                 {stage === "done" && (<><CheckCircle2 className="h-4 w-4 text-green-400" /> All done</>)}
               </CardTitle>
@@ -164,7 +163,7 @@ export default function MeUpdate() {
             <CardContent>
               {info && stage !== "done" && (
                 <div className="mb-4 flex items-start gap-2 text-sm text-blue-300 bg-blue-500/10 border border-blue-500/20 rounded-md p-3">
-                  <MessageSquare className="h-4 w-4 flex-shrink-0 mt-0.5" />
+                  <Mail className="h-4 w-4 flex-shrink-0 mt-0.5" />
                   <p>{info}</p>
                 </div>
               )}
@@ -175,26 +174,27 @@ export default function MeUpdate() {
                 </div>
               )}
 
-              {stage === "phone" && (
-                <form onSubmit={requestOtp} className="space-y-4" data-testid="form-me-phone">
+              {stage === "email" && (
+                <form onSubmit={requestOtp} className="space-y-4" data-testid="form-me-email">
                   <div className="space-y-1.5">
-                    <Label htmlFor="phone">Phone number</Label>
+                    <Label htmlFor="email">Email address</Label>
                     <Input
-                      id="phone"
-                      type="tel"
+                      id="email"
+                      type="email"
                       required
-                      placeholder="082 123 4567"
-                      value={phone}
-                      onChange={e => setPhone(e.target.value)}
+                      placeholder="you@example.com"
+                      value={email}
+                      onChange={e => setEmail(e.target.value)}
                       className="bg-background border-border"
-                      data-testid="input-me-phone"
+                      data-testid="input-me-email"
+                      autoComplete="email"
                     />
                     <p className="text-xs text-muted-foreground">
-                      Use the same number you signed up with. We'll send a 4-digit code via WhatsApp.
+                      Use the same email you signed up with. We'll send a 4-digit code to your inbox.
                     </p>
                   </div>
                   <Button type="submit" className="w-full" disabled={busy} data-testid="button-me-request-otp">
-                    {busy ? <><Loader2 className="h-4 w-4 animate-spin mr-2" /> Sending…</> : "Send WhatsApp Code"}
+                    {busy ? <><Loader2 className="h-4 w-4 animate-spin mr-2" /> Sending…</> : "Send Email Code"}
                   </Button>
                 </form>
               )}
@@ -216,9 +216,12 @@ export default function MeUpdate() {
                       data-testid="input-me-code"
                       autoComplete="one-time-code"
                     />
+                    <p className="text-xs text-muted-foreground">
+                      Didn't get an email? Check your spam folder, or go back and try again in a minute.
+                    </p>
                   </div>
                   <div className="flex gap-2">
-                    <Button type="button" variant="outline" onClick={() => { setStage("phone"); setCode(""); setError(null); setInfo(null); }} disabled={busy}>
+                    <Button type="button" variant="outline" onClick={() => { setStage("email"); setCode(""); setError(null); setInfo(null); }} disabled={busy}>
                       Back
                     </Button>
                     <Button type="submit" className="flex-1" disabled={busy} data-testid="button-me-verify-otp">
@@ -237,10 +240,10 @@ export default function MeUpdate() {
                       className="bg-background border-border" data-testid="input-me-fullname" />
                   </div>
                   <div className="space-y-1.5">
-                    <Label htmlFor="email">Email</Label>
-                    <Input id="email" type="email" required value={record.email}
+                    <Label htmlFor="edit-email">Email</Label>
+                    <Input id="edit-email" type="email" required value={record.email}
                       onChange={e => setRecord({ ...record, email: e.target.value })}
-                      className="bg-background border-border" data-testid="input-me-email" />
+                      className="bg-background border-border" data-testid="input-me-edit-email" />
                   </div>
                   <div className="grid grid-cols-2 gap-3">
                     <div className="space-y-1.5">
@@ -282,7 +285,7 @@ export default function MeUpdate() {
                     </div>
                   )}
                   <p className="text-xs text-muted-foreground">
-                    Your phone number stays linked to this record. To change it, contact your street captain.
+                    To change your phone number, contact your street captain.
                   </p>
                   <Button type="submit" className="w-full" disabled={busy} data-testid="button-me-save">
                     {busy ? <><Loader2 className="h-4 w-4 animate-spin mr-2" /> Saving…</> : "Save Changes"}

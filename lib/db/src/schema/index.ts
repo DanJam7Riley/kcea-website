@@ -82,9 +82,6 @@ export const captainProfilesTable = pgTable("captain_profiles", {
 export const siteSettingsTable = pgTable("site_settings", {
   id: serial("id").primaryKey(),
   notifyWhatsapp: text("notify_whatsapp"),
-  twilioAccountSid: text("twilio_account_sid"),
-  twilioAuthToken: text("twilio_auth_token"),
-  twilioWhatsappFrom: text("twilio_whatsapp_from"),
   adminPassword2: text("admin_password_2"),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
@@ -140,7 +137,7 @@ export type InsertPledge = z.infer<typeof insertPledgeSchema>;
 // successfully redeemed and rely on `expiresAt` for the 10-minute window.
 export const otpCodesTable = pgTable("otp_codes", {
   id: serial("id").primaryKey(),
-  phoneKey: text("phone_key").notNull(),
+  emailKey: text("email_key").notNull(),
   commitmentId: integer("commitment_id").notNull(),
   codeHash: text("code_hash").notNull(),
   expiresAt: timestamp("expires_at").notNull(),
