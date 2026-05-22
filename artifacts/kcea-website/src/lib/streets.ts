@@ -98,3 +98,33 @@ export function needsStreetInfo(street: string | null | undefined): boolean {
   const s = (street ?? "").trim().toLowerCase();
   return s === "" || s === "other";
 }
+
+// Street commitment status is purely derived from % of target households
+// committed — admins can no longer set this manually, so the label always
+// reflects real progress.
+//   0–25% → Critical
+//   26–50% → In Progress
+//   51–75% → Good
+//   76–90% → Strong
+//   91–100% → Excellent
+export type StreetStatus = "Critical" | "In Progress" | "Good" | "Strong" | "Excellent";
+
+export function computeStreetStatus(committed: number, target: number): StreetStatus {
+  if (!target || target <= 0) return "Critical";
+  const pct = Math.min(100, Math.max(0, (committed / target) * 100));
+  if (pct <= 25) return "Critical";
+  if (pct <= 50) return "In Progress";
+  if (pct <= 75) return "Good";
+  if (pct <= 90) return "Strong";
+  return "Excellent";
+}
+
+export function getStreetStatusClass(status: StreetStatus): string {
+  switch (status) {
+    case "Excellent": return "bg-emerald-500/20 text-emerald-400 border-emerald-500/30";
+    case "Strong":    return "bg-green-500/20 text-green-400 border-green-500/30";
+    case "Good":      return "bg-blue-500/20 text-blue-400 border-blue-500/30";
+    case "In Progress": return "bg-amber-500/20 text-amber-400 border-amber-500/30";
+    case "Critical":  return "bg-red-500/20 text-red-400 border-red-500/30";
+  }
+}

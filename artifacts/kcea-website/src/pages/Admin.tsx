@@ -10,10 +10,10 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { computeStreetStatus, getStreetStatusClass } from "@/lib/streets";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 
-const STATUS_OPTIONS = ["Strong", "Good", "Solid", "Steady", "In Progress", "Re-engaged", "Critical"];
 const TABS = ["submissions", "stats", "captains", "incomplete", "captain-mgmt", "pledges", "settings"] as const;
 type Tab = typeof TABS[number];
 
@@ -144,13 +144,6 @@ interface CaptainNote {
   updatedAt: string;
 }
 
-function getStatusColor(status: string) {
-  if (status === "Strong" || status === "Good") return "bg-green-500/20 text-green-400";
-  if (status === "Solid" || status === "Steady") return "bg-blue-500/20 text-blue-400";
-  if (status === "In Progress") return "bg-amber-500/20 text-amber-400";
-  if (status === "Re-engaged") return "bg-purple-500/20 text-purple-400";
-  return "bg-red-500/20 text-red-400";
-}
 
 function TypeBadge({ type }: { type: string }) {
   return type === "onceoff"
@@ -1393,7 +1386,6 @@ export default function Admin() {
                   {filteredCaptains.map(c => {
                     const edit = captainEdits[c.id] ?? {};
                     const isDirty = Object.keys(edit).length > 0;
-                    const currentStatus = edit.status ?? c.status;
                     const isSaving = updateCaptain.isPending && updateCaptain.variables?.id === c.id;
                     const wasSaved = savedCaptains.has(c.id);
                     const isActive = c.captainStatus === "Active Captain";
@@ -1439,16 +1431,20 @@ export default function Admin() {
                           />
                         </div>
                         <div className="col-span-1">
-                          <select
-                            defaultValue={c.status}
-                            key={`status-${c.id}-${c.status}`}
-                            onChange={e => handleCaptainChange(c.id, "status", e.target.value)}
-                            className="w-full h-8 rounded-md border border-border bg-card text-foreground text-sm px-1 focus:outline-none focus:ring-1 focus:ring-primary"
-                          >
-                            {STATUS_OPTIONS.map(s => (
-                              <option key={s} value={s}>{s}</option>
-                            ))}
-                          </select>
+                          {(() => {
+                            const target = (edit.targetHouseholds ?? c.targetHouseholds) ?? 30;
+                            const committed = c.forms ?? 0;
+                            const computed = computeStreetStatus(committed, target);
+                            return (
+                              <div
+                                className={`w-full h-8 rounded-md border text-xs font-medium px-2 flex items-center justify-center ${getStreetStatusClass(computed)}`}
+                                title={`Auto-calculated from ${committed} of ${target} households (${target > 0 ? Math.round((committed / target) * 100) : 0}%)`}
+                                data-testid={`badge-captain-status-${c.id}`}
+                              >
+                                {computed}
+                              </div>
+                            );
+                          })()}
                         </div>
                         <div className="col-span-2 flex flex-col items-start gap-1.5 pt-0.5">
                           <button
@@ -1511,8 +1507,8 @@ export default function Admin() {
                           </Button>
                           {wasSaved && <CheckCircle className="h-4 w-4 text-green-400 shrink-0" />}
                           {isDirty && !wasSaved && (
-                            <Badge className={`text-xs shrink-0 ${getStatusColor(currentStatus)}`} variant="secondary">
-                              {currentStatus}
+                            <Badge className="text-xs shrink-0 bg-amber-500/20 text-amber-400 border-amber-500/30" variant="secondary">
+                              Unsaved
                             </Badge>
                           )}
                           <Button

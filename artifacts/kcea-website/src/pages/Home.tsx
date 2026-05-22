@@ -16,7 +16,7 @@ import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useToast } from "@/hooks/use-toast";
-import { STREET_OPTIONS, suggestStreet } from "@/lib/streets";
+import { STREET_OPTIONS, suggestStreet, computeStreetStatus, getStreetStatusClass } from "@/lib/streets";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 
@@ -251,13 +251,6 @@ export default function Home() {
     });
   };
 
-  const getStatusColor = (status: string) => {
-    if (status === "Strong" || status === "Good") return "bg-green-500/20 text-green-400 hover:bg-green-500/30";
-    if (status === "Solid" || status === "Steady") return "bg-blue-500/20 text-blue-400 hover:bg-blue-500/30";
-    if (status === "In Progress") return "bg-amber-500/20 text-amber-400 hover:bg-amber-500/30";
-    if (status === "Re-engaged") return "bg-purple-500/20 text-purple-400 hover:bg-purple-500/30";
-    return "bg-red-500/20 text-red-400 hover:bg-red-500/30";
-  };
 
   const scrollTo = (id: string) => {
     const el = document.getElementById(id);
@@ -815,12 +808,13 @@ export default function Home() {
                         const target = street.targetHouseholds ?? 30;
                         const committed = streetCommittedCounts[street.street] ?? 0;
                         const pct = target > 0 ? Math.min(100, Math.round((committed / target) * 100)) : 0;
+                        const computedStatus = computeStreetStatus(committed, target);
                         return (
                           <>
                             <div className="flex items-center justify-between">
                               <span className="text-sm font-medium">{committed} of {target} households</span>
-                              <Badge className={getStatusColor(street.status)} variant="secondary" data-testid={`badge-status-${street.street}`}>
-                                {street.status}
+                              <Badge className={getStreetStatusClass(computedStatus)} variant="secondary" data-testid={`badge-status-${street.street}`}>
+                                {computedStatus}
                               </Badge>
                             </div>
                             <Progress value={pct} className="h-1.5" />
