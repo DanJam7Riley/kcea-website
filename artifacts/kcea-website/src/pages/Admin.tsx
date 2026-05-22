@@ -282,19 +282,29 @@ export default function Admin() {
   const [captainStatusFilter, setCaptainStatusFilter] = useState<"all" | "Active Captain" | "Pending / New Volunteer" | "Unassigned">("all");
   const filteredCaptains = useMemo(() => {
     const q = captainSearch.trim().toLowerCase();
-    return captains.filter(c => {
-      if (captainStatusFilter !== "all") {
-        if (captainStatusFilter === "Unassigned") {
-          const isUnassigned = !c.captain || c.captain.trim().toLowerCase() === "unassigned";
-          if (!isUnassigned) return false;
-        } else if (c.captainStatus !== captainStatusFilter) {
-          return false;
+    return captains
+      .filter(c => {
+        if (captainStatusFilter !== "all") {
+          if (captainStatusFilter === "Unassigned") {
+            const isUnassigned = !c.captain || c.captain.trim().toLowerCase() === "unassigned";
+            if (!isUnassigned) return false;
+          } else if (c.captainStatus !== captainStatusFilter) {
+            return false;
+          }
         }
-      }
-      if (!q) return true;
-      const hay = [c.captain, c.street, c.phone, c.email].filter(Boolean).join(" ").toLowerCase();
-      return hay.includes(q);
-    });
+        if (!q) return true;
+        const hay = [c.captain, c.street, c.phone, c.email].filter(Boolean).join(" ").toLowerCase();
+        return hay.includes(q);
+      })
+      // Permanent A→Z sort by street so the list always reads in alphabetical
+      // order, including any newly added streets. Falls back to captain name
+      // for two rows on the same street.
+      .slice()
+      .sort((a, b) => {
+        const s = (a.street ?? "").localeCompare(b.street ?? "", undefined, { sensitivity: "base" });
+        if (s !== 0) return s;
+        return (a.captain ?? "").localeCompare(b.captain ?? "", undefined, { sensitivity: "base" });
+      });
   }, [captains, captainSearch, captainStatusFilter]);
   const filtersActive = captainSearch.trim() !== "" || captainStatusFilter !== "all";
 
