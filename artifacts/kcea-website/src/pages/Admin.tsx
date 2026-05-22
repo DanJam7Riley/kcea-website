@@ -463,6 +463,17 @@ export default function Admin() {
     enabled: authed && activeTab === "captain-mgmt",
   });
 
+  const [profileSearch, setProfileSearch] = useState("");
+  const filteredProfiles = useMemo(() => {
+    const q = profileSearch.trim().toLowerCase();
+    if (!q) return captainProfiles;
+    return captainProfiles.filter(p => {
+      if (p.name.toLowerCase().includes(q)) return true;
+      const streets = captains.filter(c => c.captain === p.name).map(c => c.street.toLowerCase());
+      return streets.some(s => s.includes(q));
+    });
+  }, [captainProfiles, captains, profileSearch]);
+
   const { data: siteSettings } = useQuery<{ notifyWhatsapp: string | null }>({
     queryKey: ["site-settings"],
     queryFn: () => fetch(`${BASE}/api/settings`, { headers: authHeaders }).then(async r => {
@@ -1480,14 +1491,45 @@ export default function Admin() {
                   </div>
                 )}
 
+                {captainProfiles.length > 0 && (
+                  <div className="relative">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
+                    <Input
+                      type="text"
+                      value={profileSearch}
+                      onChange={e => setProfileSearch(e.target.value)}
+                      placeholder="Search by captain name or street..."
+                      className="pl-9 pr-9 bg-background border-border"
+                      data-testid="input-profile-search"
+                    />
+                    {profileSearch && (
+                      <button
+                        type="button"
+                        onClick={() => setProfileSearch("")}
+                        className="absolute right-2 top-1/2 -translate-y-1/2 h-6 w-6 inline-flex items-center justify-center rounded text-muted-foreground hover:text-foreground hover:bg-muted/50"
+                        title="Clear search"
+                        aria-label="Clear search"
+                      >
+                        <span className="text-lg leading-none">×</span>
+                      </button>
+                    )}
+                  </div>
+                )}
+
                 {captainProfiles.length === 0 ? (
                   <div className="text-center py-8 space-y-2">
                     <Key className="h-8 w-8 text-muted-foreground/40 mx-auto" />
                     <p className="text-sm text-muted-foreground">Loading captain profiles…</p>
                   </div>
+                ) : filteredProfiles.length === 0 ? (
+                  <div className="text-center py-8 space-y-2">
+                    <Search className="h-8 w-8 text-muted-foreground/40 mx-auto" />
+                    <p className="text-sm text-muted-foreground">No captains match "{profileSearch}".</p>
+                    <button type="button" onClick={() => setProfileSearch("")} className="text-xs text-primary hover:underline">Clear search</button>
+                  </div>
                 ) : (
                   <div className="space-y-2">
-                    {captainProfiles.map(p => {
+                    {filteredProfiles.map(p => {
                       const streets = captains.filter(c => c.captain === p.name).map(c => c.street);
                       const isSaved = savedProfiles.has(p.id);
                       const isSettingPin = setPinLoading.has(p.id);
