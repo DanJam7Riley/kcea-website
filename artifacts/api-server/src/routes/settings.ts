@@ -2,13 +2,18 @@ import { Router } from "express";
 import { db, siteSettingsTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { getOrCreateSettings } from "../lib/settings";
+import {
+  isAdminReq,
+  isPrimaryReq,
+  getSecondaryPasswordSync,
+  persistSecondaryPassword,
+  SECONDARY_USERNAME,
+} from "../lib/admin-auth";
 
 const router = Router();
-const ADMIN_PASSWORD = () => process.env.ADMIN_PASSWORD ?? "kcea2026";
 
 router.get("/settings", async (req, res) => {
-  const pw = req.headers["x-admin-password"] as string;
-  if (!pw || pw !== ADMIN_PASSWORD()) {
+  if (!isAdminReq(req.headers)) {
     res.status(401).json({ error: "Unauthorized" });
     return;
   }
@@ -21,9 +26,38 @@ router.get("/settings", async (req, res) => {
   }
 });
 
+// PRIMARY-ADMIN ONLY: view + update the secondary admin password (and surface the
+// configured secondary username so the UI can show what to log in with).
+router.get("/admin/secondary", (req, res) => {
+  if (!isPrimaryReq(req.headers)) {
+    res.status(403).json({ error: "Primary admin only" });
+    return;
+  }
+  res.json({ username: SECONDARY_USERNAME, password: getSecondaryPasswordSync() });
+});
+
+router.put("/admin/secondary", async (req, res) => {
+  if (!isPrimaryReq(req.headers)) {
+    res.status(403).json({ error: "Primary admin only" });
+    return;
+  }
+  const body = req.body as Record<string, unknown>;
+  const newPw = typeof body.password === "string" ? body.password.trim() : "";
+  if (newPw.length < 6) {
+    res.status(400).json({ error: "Password must be at least 6 characters." });
+    return;
+  }
+  try {
+    await persistSecondaryPassword(newPw);
+    res.json({ ok: true, username: SECONDARY_USERNAME, password: getSecondaryPasswordSync() });
+  } catch (err) {
+    req.log.error(err);
+    res.status(500).json({ error: "Failed to update secondary admin password" });
+  }
+});
+
 router.put("/settings", async (req, res) => {
-  const pw = req.headers["x-admin-password"] as string;
-  if (!pw || pw !== ADMIN_PASSWORD()) {
+  if (!isAdminReq(req.headers)) {
     res.status(401).json({ error: "Unauthorized" });
     return;
   }

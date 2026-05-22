@@ -1,4 +1,4 @@
-import { useState, useRef, useMemo } from "react";
+import { useState, useRef, useMemo, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Shield, Save, LogIn, AlertTriangle, CheckCircle, Check, Key, Pencil,
@@ -158,9 +158,16 @@ function TypeBadge({ type }: { type: string }) {
 }
 
 export default function Admin() {
+  const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [authed, setAuthed] = useState(false);
+  const [authRole, setAuthRole] = useState<"primary" | "secondary" | null>(null);
   const [authError, setAuthError] = useState("");
+  const [secondaryPwView, setSecondaryPwView] = useState<{ username: string; password: string } | null>(null);
+  const [secondaryPwEdit, setSecondaryPwEdit] = useState("");
+  const [secondaryPwSaved, setSecondaryPwSaved] = useState(false);
+  const [secondaryPwError, setSecondaryPwError] = useState("");
+  const [showSecondaryPw, setShowSecondaryPw] = useState(false);
   const [activeTab, setActiveTab] = useState<Tab>("submissions");
   const [search, setSearch] = useState("");
 
@@ -225,7 +232,22 @@ export default function Admin() {
 
   const qc = useQueryClient();
 
-  const authHeaders = { "x-admin-password": password };
+  const authHeaders = { "x-admin-username": username.trim(), "x-admin-password": password };
+
+  useEffect(() => {
+    if (!authed || authRole !== "primary") return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`${BASE}/api/admin/secondary`, { headers: authHeaders });
+        if (!res.ok) return;
+        const data = await res.json() as { username: string; password: string };
+        if (!cancelled) setSecondaryPwView({ username: data.username, password: data.password });
+      } catch { /* ignore */ }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authed, authRole]);
 
   const { data: stats, isLoading: statsLoading } = useQuery<SiteStats>({
     queryKey: ["stats"],
@@ -595,9 +617,11 @@ export default function Admin() {
         headers: authHeaders,
       });
       if (res.ok) {
+        const data = await res.json().catch(() => ({})) as { role?: "primary" | "secondary" };
+        setAuthRole(data.role ?? "secondary");
         setAuthed(true);
       } else {
-        setAuthError("Incorrect password. Please try again.");
+        setAuthError("Incorrect username or password. Please try again.");
       }
     } catch {
       setAuthError("Could not reach the server. Please try again.");
@@ -732,10 +756,22 @@ export default function Admin() {
               </div>
             </div>
             <CardTitle className="text-2xl">KCEA Admin</CardTitle>
-            <p className="text-sm text-muted-foreground">Enter your admin password to continue</p>
+            <p className="text-sm text-muted-foreground">Enter your admin credentials to continue</p>
           </CardHeader>
           <CardContent>
             <form onSubmit={handleLogin} className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="username">Username</Label>
+                <Input
+                  id="username"
+                  type="text"
+                  value={username}
+                  onChange={e => setUsername(e.target.value)}
+                  autoComplete="username"
+                  placeholder="kcea-admin"
+                  className="bg-background border-border"
+                />
+              </div>
               <div className="space-y-2">
                 <Label htmlFor="password">Password</Label>
                 <Input
@@ -744,6 +780,7 @@ export default function Admin() {
                   value={password}
                   onChange={e => setPassword(e.target.value)}
                   required
+                  autoComplete="current-password"
                   placeholder="••••••••"
                   className="bg-background border-border"
                 />
@@ -775,7 +812,12 @@ export default function Admin() {
           </div>
           <div className="flex items-center gap-3">
             <a href="/" className="text-sm text-muted-foreground hover:text-primary transition-colors">← Back to site</a>
-            <Button variant="outline" size="sm" className="border-border" onClick={() => { setAuthed(false); setPassword(""); }}>
+            {authRole === "secondary" && (
+              <span className="hidden sm:inline-flex items-center gap-1 rounded-full border border-blue-500/30 bg-blue-500/10 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-blue-300">
+                Secondary admin
+              </span>
+            )}
+            <Button variant="outline" size="sm" className="border-border" onClick={() => { setAuthed(false); setPassword(""); setUsername(""); setAuthRole(null); setSecondaryPwView(null); }}>
               Sign Out
             </Button>
           </div>
@@ -1872,6 +1914,89 @@ export default function Admin() {
                     )}
                   </div>
                 </div>
+
+                {authRole === "primary" && (
+                  <div className="pt-4 border-t border-border space-y-2">
+                    <Label className="text-sm">Secondary admin account</Label>
+                    <p className="text-xs text-muted-foreground">
+                      A second admin login with full access. Username is set by the
+                      <code className="mx-1 px-1 bg-background/60 rounded">ADMIN_USERNAME_2</code>
+                      environment variable (default <code className="px-1 bg-background/60 rounded">kcea-admin2</code>).
+                      Only the primary admin can change this password.
+                    </p>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                      <div className="space-y-1">
+                        <Label className="text-xs text-muted-foreground">Username</Label>
+                        <Input value={secondaryPwView?.username ?? "kcea-admin2"} readOnly className="bg-background/40 border-border font-mono text-sm" />
+                      </div>
+                      <div className="space-y-1">
+                        <Label className="text-xs text-muted-foreground">Current password</Label>
+                        <div className="flex gap-2">
+                          <Input
+                            value={secondaryPwView?.password ?? ""}
+                            readOnly
+                            type={showSecondaryPw ? "text" : "password"}
+                            placeholder="••••••••"
+                            className="bg-background/40 border-border font-mono text-sm"
+                          />
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className="border-border whitespace-nowrap"
+                            onClick={() => setShowSecondaryPw(s => !s)}
+                          >
+                            {showSecondaryPw ? "Hide" : "Show"}
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="pt-2 space-y-2">
+                      <Label htmlFor="secondary-new-pw" className="text-xs text-muted-foreground">Set new password (min 6 characters)</Label>
+                      <div className="flex gap-2">
+                        <Input
+                          id="secondary-new-pw"
+                          type="text"
+                          value={secondaryPwEdit}
+                          onChange={e => { setSecondaryPwEdit(e.target.value); setSecondaryPwSaved(false); setSecondaryPwError(""); }}
+                          placeholder="New password for secondary admin"
+                          className="bg-background border-border font-mono text-sm"
+                        />
+                        <Button
+                          size="sm"
+                          className="bg-primary text-primary-foreground hover:bg-primary/90 gap-1 whitespace-nowrap"
+                          disabled={secondaryPwEdit.trim().length < 6}
+                          onClick={async () => {
+                            setSecondaryPwError("");
+                            setSecondaryPwSaved(false);
+                            try {
+                              const res = await fetch(`${BASE}/api/admin/secondary`, {
+                                method: "PUT",
+                                headers: { ...authHeaders, "Content-Type": "application/json" },
+                                body: JSON.stringify({ password: secondaryPwEdit.trim() }),
+                              });
+                              if (!res.ok) {
+                                const data = await res.json().catch(() => ({})) as { error?: string };
+                                setSecondaryPwError(data.error ?? "Failed to update password.");
+                                return;
+                              }
+                              const data = await res.json() as { username: string; password: string };
+                              setSecondaryPwView({ username: data.username, password: data.password });
+                              setSecondaryPwEdit("");
+                              setSecondaryPwSaved(true);
+                            } catch {
+                              setSecondaryPwError("Could not reach the server.");
+                            }
+                          }}
+                        >
+                          <Save className="h-3.5 w-3.5" /> Update password
+                        </Button>
+                      </div>
+                      {secondaryPwSaved && <p className="text-xs text-green-400">Secondary admin password updated.</p>}
+                      {secondaryPwError && <p className="text-xs text-red-400">{secondaryPwError}</p>}
+                    </div>
+                  </div>
+                )}
 
                 <div className="pt-4 border-t border-border space-y-2">
                   <Label className="text-sm">Apply data fixes</Label>

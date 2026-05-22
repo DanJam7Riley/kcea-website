@@ -4,7 +4,7 @@ import { eq, desc, sql, and } from "drizzle-orm";
 
 const router = Router();
 
-const ADMIN_PASSWORD = () => process.env.ADMIN_PASSWORD ?? "kcea2026";
+import { isAdminReq } from "../lib/admin-auth";
 
 // PUBLIC: total pledged amount (sum only, no names or breakdowns).
 router.get("/pledges/total", async (_req, res) => {
@@ -84,8 +84,7 @@ router.post("/pledges", async (req, res) => {
 
 // ADMIN: list all pledges.
 router.get("/pledges", async (req, res) => {
-  const pw = req.headers["x-admin-password"] as string;
-  if (!pw || pw !== ADMIN_PASSWORD()) { res.status(401).json({ error: "Unauthorized" }); return; }
+  if (!isAdminReq(req.headers)) { res.status(401).json({ error: "Unauthorized" }); return; }
   try {
     const rows = await db.select().from(pledgesTable).orderBy(desc(pledgesTable.createdAt));
     res.json(rows);
@@ -97,8 +96,7 @@ router.get("/pledges", async (req, res) => {
 
 // ADMIN: delete a pledge.
 router.delete("/pledges/:id", async (req, res) => {
-  const pw = req.headers["x-admin-password"] as string;
-  if (!pw || pw !== ADMIN_PASSWORD()) { res.status(401).json({ error: "Unauthorized" }); return; }
+  if (!isAdminReq(req.headers)) { res.status(401).json({ error: "Unauthorized" }); return; }
   const id = parseInt(req.params.id, 10);
   if (isNaN(id)) { res.status(400).json({ error: "Invalid id" }); return; }
   try {

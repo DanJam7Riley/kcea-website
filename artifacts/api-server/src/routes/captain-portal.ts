@@ -4,7 +4,7 @@ import { db, captainProfilesTable, captainTokensTable, streetCaptainsTable, comm
 import { eq, and, inArray, gt, desc } from "drizzle-orm";
 
 const router = Router();
-const ADMIN_PASSWORD = () => process.env.ADMIN_PASSWORD ?? "kcea2026";
+import { isAdminReq } from "../lib/admin-auth";
 const TOKEN_TTL_MS = 24 * 60 * 60 * 1000;
 
 const SEEDED_CAPTAIN_NAMES = [
@@ -351,8 +351,7 @@ router.delete("/captain/session", async (req, res) => {
 
 // GET /api/captain/management
 router.get("/captain/management", async (req, res) => {
-  const pw = req.headers["x-admin-password"] as string;
-  if (!pw || pw !== ADMIN_PASSWORD()) { res.status(401).json({ error: "Unauthorized" }); return; }
+  if (!isAdminReq(req.headers)) { res.status(401).json({ error: "Unauthorized" }); return; }
   try {
     await seedProfiles();
     const profiles = await db.select().from(captainProfilesTable).orderBy(captainProfilesTable.name);
@@ -365,8 +364,7 @@ router.get("/captain/management", async (req, res) => {
 
 // POST /api/captain/management/profiles
 router.post("/captain/management/profiles", async (req, res) => {
-  const pw = req.headers["x-admin-password"] as string;
-  if (!pw || pw !== ADMIN_PASSWORD()) { res.status(401).json({ error: "Unauthorized" }); return; }
+  if (!isAdminReq(req.headers)) { res.status(401).json({ error: "Unauthorized" }); return; }
   const body = req.body as Record<string, unknown>;
   const name = typeof body.name === "string" ? body.name.trim() : "";
   const phone = typeof body.phone === "string" ? normalizePhone(body.phone.trim()) : "";
@@ -382,8 +380,7 @@ router.post("/captain/management/profiles", async (req, res) => {
 
 // PUT /api/captain/management/:id
 router.put("/captain/management/:id", async (req, res) => {
-  const pw = req.headers["x-admin-password"] as string;
-  if (!pw || pw !== ADMIN_PASSWORD()) { res.status(401).json({ error: "Unauthorized" }); return; }
+  if (!isAdminReq(req.headers)) { res.status(401).json({ error: "Unauthorized" }); return; }
   const id = parseInt(req.params.id, 10);
   if (isNaN(id)) { res.status(400).json({ error: "Invalid id" }); return; }
 
@@ -416,8 +413,7 @@ router.put("/captain/management/:id", async (req, res) => {
 
 // POST /api/captain/management/:id/set-pin  — generate (or set) PIN and notify captain via WhatsApp
 router.post("/captain/management/:id/set-pin", async (req, res) => {
-  const pw = req.headers["x-admin-password"] as string;
-  if (!pw || pw !== ADMIN_PASSWORD()) { res.status(401).json({ error: "Unauthorized" }); return; }
+  if (!isAdminReq(req.headers)) { res.status(401).json({ error: "Unauthorized" }); return; }
   const id = parseInt(req.params.id, 10);
   if (isNaN(id)) { res.status(400).json({ error: "Invalid id" }); return; }
 
@@ -443,8 +439,7 @@ router.post("/captain/management/:id/set-pin", async (req, res) => {
 
 // POST /api/captain/management/:id/mark-pin-sent — admin clicked "Send PIN via WhatsApp"
 router.post("/captain/management/:id/mark-pin-sent", async (req, res) => {
-  const pw = req.headers["x-admin-password"] as string;
-  if (!pw || pw !== ADMIN_PASSWORD()) { res.status(401).json({ error: "Unauthorized" }); return; }
+  if (!isAdminReq(req.headers)) { res.status(401).json({ error: "Unauthorized" }); return; }
   const id = parseInt(req.params.id, 10);
   if (isNaN(id)) { res.status(400).json({ error: "Invalid id" }); return; }
   try {
@@ -463,8 +458,7 @@ router.post("/captain/management/:id/mark-pin-sent", async (req, res) => {
 
 // DELETE /api/captain/management/:id
 router.delete("/captain/management/:id", async (req, res) => {
-  const pw = req.headers["x-admin-password"] as string;
-  if (!pw || pw !== ADMIN_PASSWORD()) { res.status(401).json({ error: "Unauthorized" }); return; }
+  if (!isAdminReq(req.headers)) { res.status(401).json({ error: "Unauthorized" }); return; }
   const id = parseInt(req.params.id, 10);
   if (isNaN(id)) { res.status(400).json({ error: "Invalid id" }); return; }
   try {
@@ -480,8 +474,7 @@ router.delete("/captain/management/:id", async (req, res) => {
 
 // GET /api/captain/management/notes
 router.get("/captain/management/notes", async (req, res) => {
-  const pw = req.headers["x-admin-password"] as string;
-  if (!pw || pw !== ADMIN_PASSWORD()) { res.status(401).json({ error: "Unauthorized" }); return; }
+  if (!isAdminReq(req.headers)) { res.status(401).json({ error: "Unauthorized" }); return; }
   try {
     const notes = await db.select().from(propertyNotesTable).orderBy(desc(propertyNotesTable.updatedAt));
     res.json(notes);

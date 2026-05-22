@@ -4,7 +4,7 @@ import { or, isNull, eq, sql, and } from "drizzle-orm";
 import { getOrCreateSettings } from "../lib/settings";
 
 const router = Router();
-const ADMIN_PASSWORD = () => process.env.ADMIN_PASSWORD ?? "kcea2026";
+import { isAdminReq } from "../lib/admin-auth";
 
 const CAPTAIN_UPDATES: Array<{ street: string; captain: string; phone?: string; email?: string }> = [
   { street: "Nile", captain: "Janine Riley", phone: "0832355052", email: "janine.riley@me.com" },
@@ -15,8 +15,7 @@ const CAPTAIN_UPDATES: Array<{ street: string; captain: string; phone?: string; 
 ];
 
 router.post("/admin/migrate", async (req, res) => {
-  const pw = req.headers["x-admin-password"] as string;
-  if (!pw || pw !== ADMIN_PASSWORD()) {
+  if (!isAdminReq(req.headers)) {
     res.status(401).json({ error: "Unauthorized" });
     return;
   }

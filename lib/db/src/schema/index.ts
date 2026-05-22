@@ -85,6 +85,7 @@ export const siteSettingsTable = pgTable("site_settings", {
   twilioAccountSid: text("twilio_account_sid"),
   twilioAuthToken: text("twilio_auth_token"),
   twilioWhatsappFrom: text("twilio_whatsapp_from"),
+  adminPassword2: text("admin_password_2"),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
 export type SiteSettings = typeof siteSettingsTable.$inferSelect;

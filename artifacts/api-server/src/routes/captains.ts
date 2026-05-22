@@ -29,9 +29,9 @@ async function getOrSeedCaptains() {
   return seeded;
 }
 
-const adminPassword = () => process.env.ADMIN_PASSWORD ?? "kcea2026";
+import { isAdminReq } from "../lib/admin-auth";
 function isAdmin(req: import("express").Request) {
-  return req.headers["x-admin-password"] === adminPassword();
+  return isAdminReq(req.headers);
 }
 
 router.get("/captains", async (req, res) => {

@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { db, siteStatsTable, commitmentsTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
+import { isAdminReq, adminRoleFromHeaders } from "../lib/admin-auth";
 
 const router = Router();
 
@@ -27,13 +28,12 @@ async function calcStats(targetHouseholds: number) {
 }
 
 router.post("/admin/verify", (req, res) => {
-  const password = req.headers["x-admin-password"] as string;
-  const adminPassword = process.env.ADMIN_PASSWORD ?? "kcea2026";
-  if (!password || password !== adminPassword) {
+  const role = adminRoleFromHeaders(req.headers);
+  if (!role) {
     res.status(401).json({ error: "Unauthorized" });
     return;
   }
-  res.json({ ok: true });
+  res.json({ ok: true, role });
 });
 
 router.get("/stats", async (req, res) => {
@@ -47,9 +47,7 @@ router.get("/stats", async (req, res) => {
 });
 
 router.put("/stats", async (req, res) => {
-  const password = req.headers["x-admin-password"] as string;
-  const adminPassword = process.env.ADMIN_PASSWORD ?? "kcea2026";
-  if (!password || password !== adminPassword) {
+  if (!isAdminReq(req.headers)) {
     res.status(401).json({ error: "Unauthorized" });
     return;
   }

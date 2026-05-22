@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { db, volunteersTable } from "@workspace/db";
 import { eq, desc } from "drizzle-orm";
+import { isAdminReq } from "../lib/admin-auth";
 
 const router = Router();
 
@@ -32,9 +33,7 @@ router.post("/volunteers", async (req, res) => {
 });
 
 router.get("/volunteers", async (req, res) => {
-  const password = req.headers["x-admin-password"] as string;
-  const adminPassword = process.env.ADMIN_PASSWORD ?? "kcea2026";
-  if (!password || password !== adminPassword) {
+  if (!isAdminReq(req.headers)) {
     res.status(401).json({ error: "Unauthorized" });
     return;
   }
@@ -52,9 +51,7 @@ router.get("/volunteers", async (req, res) => {
 });
 
 router.delete("/volunteers/:id", async (req, res) => {
-  const password = req.headers["x-admin-password"] as string;
-  const adminPassword = process.env.ADMIN_PASSWORD ?? "kcea2026";
-  if (!password || password !== adminPassword) {
+  if (!isAdminReq(req.headers)) {
     res.status(401).json({ error: "Unauthorized" });
     return;
   }

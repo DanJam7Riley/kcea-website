@@ -3,6 +3,7 @@ import { db, commitmentsTable, captainProfilesTable, streetCaptainsTable } from 
 import { eq, desc, sql, and } from "drizzle-orm";
 import { getOrCreateSettings } from "../lib/settings";
 import { createHmac, timingSafeEqual } from "node:crypto";
+import { isAdminReq } from "../lib/admin-auth";
 
 const router = Router();
 
@@ -165,9 +166,7 @@ router.get("/commitments/lookup", async (req, res) => {
 });
 
 router.get("/commitments/incomplete", async (req, res) => {
-  const password = req.headers["x-admin-password"] as string;
-  const adminPassword = process.env.ADMIN_PASSWORD ?? "kcea2026";
-  if (!password || password !== adminPassword) {
+  if (!isAdminReq(req.headers)) {
     res.status(401).json({ error: "Unauthorized" });
     return;
   }
@@ -305,9 +304,7 @@ router.put("/commitments/:id/self-update", async (req, res) => {
 });
 
 router.post("/commitments/import", async (req, res) => {
-  const password = req.headers["x-admin-password"] as string;
-  const adminPassword = process.env.ADMIN_PASSWORD ?? "kcea2026";
-  if (!password || password !== adminPassword) {
+  if (!isAdminReq(req.headers)) {
     res.status(401).json({ error: "Unauthorized" });
     return;
   }
@@ -372,9 +369,7 @@ router.post("/commitments/import", async (req, res) => {
 });
 
 router.get("/commitments", async (req, res) => {
-  const password = req.headers["x-admin-password"] as string;
-  const adminPassword = process.env.ADMIN_PASSWORD ?? "kcea2026";
-  if (!password || password !== adminPassword) {
+  if (!isAdminReq(req.headers)) {
     res.status(401).json({ error: "Unauthorized" });
     return;
   }
@@ -393,9 +388,7 @@ router.get("/commitments", async (req, res) => {
 
 // Edit a commitment — admin only. Accepts a partial body of editable fields.
 router.put("/commitments/:id", async (req, res) => {
-  const password = req.headers["x-admin-password"] as string;
-  const adminPassword = process.env.ADMIN_PASSWORD ?? "kcea2026";
-  if (!password || password !== adminPassword) {
+  if (!isAdminReq(req.headers)) {
     res.status(401).json({ error: "Unauthorized" });
     return;
   }
@@ -461,9 +454,7 @@ router.put("/commitments/:id", async (req, res) => {
 
 // Toggle payment confirmed — admin only
 router.put("/commitments/:id/confirm", async (req, res) => {
-  const password = req.headers["x-admin-password"] as string;
-  const adminPassword = process.env.ADMIN_PASSWORD ?? "kcea2026";
-  if (!password || password !== adminPassword) {
+  if (!isAdminReq(req.headers)) {
     res.status(401).json({ error: "Unauthorized" });
     return;
   }
@@ -495,9 +486,7 @@ router.put("/commitments/:id/confirm", async (req, res) => {
 });
 
 router.delete("/commitments/:id", async (req, res) => {
-  const password = req.headers["x-admin-password"] as string;
-  const adminPassword = process.env.ADMIN_PASSWORD ?? "kcea2026";
-  if (!password || password !== adminPassword) {
+  if (!isAdminReq(req.headers)) {
     res.status(401).json({ error: "Unauthorized" });
     return;
   }

@@ -1,6 +1,7 @@
 import { db, siteStatsTable, streetCaptainsTable, commitmentsTable, captainProfilesTable } from "@workspace/db";
 import { and, count, eq, isNull, sql } from "drizzle-orm";
 import { logger } from "./lib/logger";
+import { loadSecondaryPassword } from "./lib/admin-auth";
 
 /** Canonical name renames so street_captains.captain matches captain_profiles.name exactly. */
 const NAME_NORMALIZATIONS: Array<{ street: string; from: string; to: string }> = [
@@ -78,6 +79,7 @@ async function splitCombinedCaptains(): Promise<number> {
 
 /** Self-healing schema guard — runs before any reads. Idempotent ADD COLUMN IF NOT EXISTS. */
 async function ensureSchema(): Promise<void> {
+  await db.execute(sql`ALTER TABLE site_settings ADD COLUMN IF NOT EXISTS admin_password_2 text`);
   await db.execute(sql`ALTER TABLE street_captains ADD COLUMN IF NOT EXISTS welcomed_at timestamp`);
   await db.execute(sql`ALTER TABLE captain_profiles ADD COLUMN IF NOT EXISTS previous_login_at timestamp`);
   await db.execute(sql`ALTER TABLE captain_profiles ADD COLUMN IF NOT EXISTS pin_sent_at timestamp`);
@@ -524,6 +526,9 @@ export async function seedIfEmpty(): Promise<void> {
         logger.info({ removed }, "Removed duplicate Unassigned captain rows");
       }
     } catch (err) { logger.warn({ err }, "Captain dedupe failed"); }
+
+    // Cache the secondary admin password so the sync auth check has the latest value.
+    try { await loadSecondaryPassword(); } catch (err) { logger.warn({ err }, "Secondary admin password load failed"); }
 
     // Run AFTER backfill so this overrides any small-street re-fill of Paul's phone.
     const corrections = await correctKnownBadPhones();
