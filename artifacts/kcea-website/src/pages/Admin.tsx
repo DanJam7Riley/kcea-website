@@ -310,9 +310,31 @@ export default function Admin() {
     for (const c of captains) set.add(c.street.trim().toLowerCase());
     return set;
   }, [captains]);
+  // Admin-side dismissed "new street" flags, persisted in localStorage so
+  // an admin doesn't have to re-dismiss the same typo on every page load.
+  // Stored as lowercased trimmed street names.
+  const DISMISSED_KEY = "kcea_admin_dismissed_new_streets";
+  const [dismissedNewStreets, setDismissedNewStreets] = useState<Set<string>>(() => {
+    try {
+      const raw = typeof window !== "undefined" ? window.localStorage.getItem(DISMISSED_KEY) : null;
+      if (!raw) return new Set();
+      const arr = JSON.parse(raw);
+      return new Set(Array.isArray(arr) ? arr.map((s: unknown) => String(s).trim().toLowerCase()) : []);
+    } catch {
+      return new Set();
+    }
+  });
+  const persistDismissed = (next: Set<string>) => {
+    setDismissedNewStreets(next);
+    try {
+      window.localStorage.setItem(DISMISSED_KEY, JSON.stringify(Array.from(next)));
+    } catch {
+      // ignore quota / private-mode failures
+    }
+  };
   const isNewStreet = (street: string) => {
     const s = (street ?? "").trim().toLowerCase();
-    return s.length > 0 && !knownStreets.has(s);
+    return s.length > 0 && !knownStreets.has(s) && !dismissedNewStreets.has(s);
   };
   const streetsForCaptainName = (name: string): string[] => {
     const n = (name ?? "").trim().toLowerCase();
@@ -925,6 +947,32 @@ export default function Admin() {
                   <Download className="h-4 w-4" />
                   Export CSV
                 </Button>
+                {(() => {
+                  const pending = new Set<string>();
+                  for (const c of commitments) {
+                    const s = (c.street ?? "").trim();
+                    if (!s || s.toLowerCase() === "other") continue;
+                    if (isNewStreet(s)) pending.add(s.toLowerCase());
+                  }
+                  if (pending.size === 0) return null;
+                  return (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="border-amber-500/40 text-amber-300 hover:text-amber-200 gap-2"
+                      data-testid="btn-ignore-all-new-streets"
+                      onClick={() => {
+                        if (confirm(`Dismiss all ${pending.size} "New Street" flag${pending.size === 1 ? "" : "s"}? They won't be added to the streets list. You can still add them manually later from the Captains tab.`)) {
+                          const next = new Set(dismissedNewStreets);
+                          for (const s of pending) next.add(s);
+                          persistDismissed(next);
+                        }
+                      }}
+                    >
+                      Ignore all ({pending.size})
+                    </Button>
+                  );
+                })()}
               </div>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -1015,19 +1063,34 @@ export default function Admin() {
                         </div>
                         <p className="text-xs text-muted-foreground">No. {c.houseNumber}</p>
                         {newStreet && (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              if (confirm(`Add "${c.street}" to the streets list with a default of 20 households? You can edit the target later in the Captains tab.`)) {
-                                addStreet.mutate(c.street.trim());
-                              }
-                            }}
-                            disabled={addStreet.isPending}
-                            className="mt-1 text-[11px] text-amber-300 hover:text-amber-200 underline underline-offset-2 disabled:opacity-50"
-                            data-testid={`btn-add-street-${c.id}`}
-                          >
-                            Add {c.street} to streets list
-                          </button>
+                          <div className="mt-1 flex items-center gap-2 flex-wrap">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (confirm(`Add "${c.street}" to the streets list with a default of 20 households? You can edit the target later in the Captains tab.`)) {
+                                  addStreet.mutate(c.street.trim());
+                                }
+                              }}
+                              disabled={addStreet.isPending}
+                              className="text-[11px] text-amber-300 hover:text-amber-200 underline underline-offset-2 disabled:opacity-50"
+                              data-testid={`btn-add-street-${c.id}`}
+                            >
+                              Add {c.street} to streets list
+                            </button>
+                            <span className="text-[11px] text-muted-foreground">·</span>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const next = new Set(dismissedNewStreets);
+                                next.add(c.street.trim().toLowerCase());
+                                persistDismissed(next);
+                              }}
+                              className="text-[11px] text-muted-foreground hover:text-foreground underline underline-offset-2"
+                              data-testid={`btn-dismiss-new-street-${c.id}`}
+                            >
+                              Dismiss
+                            </button>
+                          </div>
                         )}
                         {streetMissing && (
                           streetInfoWaUrl ? (
