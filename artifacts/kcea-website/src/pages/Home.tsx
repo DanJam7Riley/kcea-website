@@ -186,7 +186,11 @@ export default function Home() {
       g.targetHouseholds = streetTargets[c.street];
     }
   }
-  const totalCommittedHouseholds = Object.values(streetCommittedCounts).reduce((a, b) => a + b, 0);
+  // Show the raw total of all submissions (matches the admin Submissions tab count).
+  // The per-street breakdown above is still used for the street roster cards, but the
+  // public headline number must include every submission, even those for streets that
+  // don't yet have a captain row.
+  const totalCommittedHouseholds = stats.committedHouseholds;
   const totalTargetHouseholds = Object.values(streetTargets).reduce((a, b) => a + b, 0);
   const overallPct = totalTargetHouseholds > 0
     ? Math.min(100, Math.round((totalCommittedHouseholds / totalTargetHouseholds) * 100))
