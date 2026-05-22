@@ -157,19 +157,12 @@ router.post("/me/request-otp", async (req, res) => {
     const sendResult = await sendEmail(match.email, subject, bodyText);
 
     if (!sendResult.ok) {
-      req.log.warn({ commitmentId: match.id, reason: sendResult.reason }, "OTP email send failed");
-      // For "not_configured" we surface the real problem — without an email
-      // provider the whole flow is unusable and silent success would just
-      // confuse residents waiting for a code that will never arrive.
-      if (sendResult.reason === "not_configured") {
-        res.status(503).json({
-          error: "email_not_configured",
-          message:
-            "Email isn't set up on the server yet. Please contact your street captain to update your details.",
-        });
-        return;
-      }
-      // Other transient errors: log internally and still report uniform success.
+      // Log loudly so operators see it (especially `not_configured`, which
+      // makes the whole flow unusable), but never branch the public response
+      // on it — that would let attackers enumerate known emails by observing
+      // a 503 for known addresses and a 200 for unknown ones.
+      const level = sendResult.reason === "not_configured" ? "error" : "warn";
+      req.log[level]({ commitmentId: match.id, reason: sendResult.reason }, "OTP email send failed");
       res.json(uniformSuccess);
       return;
     }
