@@ -107,6 +107,7 @@ const faqs = [
 export default function Home() {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [formSubmitted, setFormSubmitted] = useState(false);
+  const [duplicateNotice, setDuplicateNotice] = useState<string>("");
   const [newsletterSubmitted, setNewsletterSubmitted] = useState(false);
   const [formData, setFormData] = useState({
     fullName: "", email: "", phone: "", street: "", houseNumber: "", commitmentType: "monthly",
@@ -204,12 +205,18 @@ export default function Home() {
       toast({ title: "Please type your street name", variant: "destructive" });
       return;
     }
+    setDuplicateNotice("");
     try {
       const res = await fetch(`${BASE}/api/commitments`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ...formData, street: resolvedStreet }),
       });
+      if (res.status === 409) {
+        const data = await res.json().catch(() => ({})) as { message?: string };
+        setDuplicateNotice(data.message ?? "It looks like you've already signed up.");
+        return;
+      }
       if (!res.ok) throw new Error("Server error");
     } catch {
       toast({ title: "Submission failed", description: "Please try again or contact your street captain.", variant: "destructive" });
@@ -516,6 +523,24 @@ export default function Home() {
               <CardContent className="p-4 sm:p-8">
                 {!formSubmitted ? (
                   <form onSubmit={handleFormSubmit} className="space-y-6" data-testid="form-commitment">
+                    {duplicateNotice && (
+                      <div
+                        className="flex items-start gap-3 rounded-lg border border-amber-500/40 bg-amber-500/10 p-4 text-sm text-amber-200"
+                        data-testid="banner-duplicate-submission"
+                      >
+                        <AlertCircle className="h-5 w-5 text-amber-400 mt-0.5 shrink-0" />
+                        <div className="space-y-1">
+                          <p className="font-semibold text-amber-300">Already on our list</p>
+                          <p className="leading-relaxed">{duplicateNotice}</p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setDuplicateNotice("")}
+                          className="ml-auto text-amber-300/70 hover:text-amber-200 text-lg leading-none"
+                          aria-label="Dismiss"
+                        >×</button>
+                      </div>
+                    )}
                     <div className="grid md:grid-cols-2 gap-6">
                       <div className="space-y-2">
                         <Label htmlFor="fullName">Full Name</Label>

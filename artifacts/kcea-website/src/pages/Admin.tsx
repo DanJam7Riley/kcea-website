@@ -121,6 +121,7 @@ interface Commitment {
 interface ImportResult {
   added: number;
   skipped: number;
+  duplicates?: number;
 }
 
 interface CaptainProfile {
@@ -934,8 +935,16 @@ export default function Admin() {
                     <p className="font-medium text-green-400">Import complete</p>
                     <p className="text-muted-foreground mt-0.5">
                       {importResult.added} record{importResult.added !== 1 ? "s" : ""} added
-                      {importResult.skipped > 0 && ` · ${importResult.skipped} skipped as duplicate${importResult.skipped !== 1 ? "s" : ""}`}
+                      {(importResult.duplicates ?? 0) > 0 && (
+                        <> · <span className="text-amber-400">{importResult.duplicates} duplicate{importResult.duplicates !== 1 ? "s" : ""} flagged &amp; skipped</span></>
+                      )}
+                      {importResult.skipped > 0 && ` · ${importResult.skipped} malformed row${importResult.skipped !== 1 ? "s" : ""} skipped`}
                     </p>
+                    {(importResult.duplicates ?? 0) > 0 && (
+                      <p className="text-xs text-muted-foreground mt-1">
+                        Duplicates match an existing record by phone number, or by name + street.
+                      </p>
+                    )}
                   </div>
                   <button onClick={() => setImportResult(null)} className="ml-auto text-muted-foreground hover:text-foreground text-lg leading-none">×</button>
                 </div>

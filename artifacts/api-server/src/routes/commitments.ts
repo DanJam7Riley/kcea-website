@@ -7,6 +7,20 @@ import { isAdminReq } from "../lib/admin-auth";
 
 const router = Router();
 
+// Duplicate-detection helpers shared by the public POST and admin CSV import.
+// A submission is a duplicate when its phone number matches an existing row, OR
+// when its (normalised) name + street pair matches an existing row.
+const normalisePhone = (p: string | null | undefined) => (p ?? "").replace(/\D/g, "");
+const nameStreetKey = (name: string, street: string) =>
+  `${name.trim().toLowerCase().replace(/\s+/g, " ")}|${street.trim().toLowerCase().replace(/\s+/g, " ")}`;
+// Anything shorter than 7 digits is too ambiguous to count as a phone match
+// (e.g. blanks, "-", short extension codes from older imports).
+const MIN_PHONE_DIGITS = 7;
+
+const DUPLICATE_MESSAGE =
+  "It looks like you've already signed up! Your household is already on our list. " +
+  "No need to submit again. If you think this is an error, contact your street captain.";
+
 const isMissingPhone = (p: string | null | undefined) => !p || p.trim() === "" || p.trim() === "-";
 const isMissingEmail = (e: string | null | undefined) => !e || e.trim() === "" || e.toLowerCase() === "imported@kcea.local";
 const isMissingName = (n: string | null | undefined) => !n || n.trim() === "";
@@ -51,6 +65,28 @@ router.post("/commitments", async (req, res) => {
   }
 
   try {
+    // Duplicate guard — same phone, OR same name + street.
+    const existing = await db
+      .select({
+        fullName: commitmentsTable.fullName,
+        street: commitmentsTable.street,
+        phone: commitmentsTable.phone,
+      })
+      .from(commitmentsTable);
+
+    const phoneNorm = normalisePhone(phone);
+    const nsKey = nameStreetKey(fullName, street);
+    const duplicate = existing.some(r => {
+      const ephone = normalisePhone(r.phone);
+      if (phoneNorm.length >= MIN_PHONE_DIGITS && ephone.length >= MIN_PHONE_DIGITS && ephone === phoneNorm) return true;
+      if (nameStreetKey(r.fullName, r.street) === nsKey) return true;
+      return false;
+    });
+    if (duplicate) {
+      res.status(409).json({ error: "duplicate", message: DUPLICATE_MESSAGE });
+      return;
+    }
+
     const [created] = await db
       .insert(commitmentsTable)
       .values({ fullName, email, phone, street, houseNumber, commitmentType, imported: false, paymentConfirmed: false })
@@ -318,15 +354,23 @@ router.post("/commitments/import", async (req, res) => {
 
   let added = 0;
   let skipped = 0;
+  let duplicates = 0;
 
   try {
     const existing = await db
-      .select({ fullName: commitmentsTable.fullName, street: commitmentsTable.street, houseNumber: commitmentsTable.houseNumber })
+      .select({
+        fullName: commitmentsTable.fullName,
+        street: commitmentsTable.street,
+        phone: commitmentsTable.phone,
+      })
       .from(commitmentsTable);
 
-    const existingKeys = new Set(
-      existing.map(r => `${r.fullName.toLowerCase()}|${r.street.toLowerCase()}|${r.houseNumber.toLowerCase()}`)
+    const existingPhones = new Set(
+      existing
+        .map(r => normalisePhone(r.phone))
+        .filter(p => p.length >= MIN_PHONE_DIGITS),
     );
+    const existingNameStreet = new Set(existing.map(r => nameStreetKey(r.fullName, r.street)));
 
     for (const row of rows) {
       if (typeof row !== "object" || row === null) { skipped++; continue; }
@@ -342,8 +386,11 @@ router.post("/commitments/import", async (req, res) => {
 
       if (!fullName || !street || !houseNumber) { skipped++; continue; }
 
-      const key = `${fullName.toLowerCase()}|${street.toLowerCase()}|${houseNumber.toLowerCase()}`;
-      if (existingKeys.has(key)) { skipped++; continue; }
+      const phoneNorm = normalisePhone(phone);
+      const nsKey = nameStreetKey(fullName, street);
+      const phoneMatch = phoneNorm.length >= MIN_PHONE_DIGITS && existingPhones.has(phoneNorm);
+      const nameStreetMatch = existingNameStreet.has(nsKey);
+      if (phoneMatch || nameStreetMatch) { duplicates++; continue; }
 
       await db.insert(commitmentsTable).values({
         fullName,
@@ -357,11 +404,12 @@ router.post("/commitments/import", async (req, res) => {
         submittedAt: isNaN(submittedAt.getTime()) ? new Date() : submittedAt,
       });
 
-      existingKeys.add(key);
+      if (phoneNorm.length >= MIN_PHONE_DIGITS) existingPhones.add(phoneNorm);
+      existingNameStreet.add(nsKey);
       added++;
     }
 
-    res.json({ added, skipped });
+    res.json({ added, skipped, duplicates });
   } catch (err) {
     req.log.error(err);
     res.status(500).json({ error: "Import failed" });
