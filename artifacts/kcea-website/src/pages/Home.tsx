@@ -40,7 +40,7 @@ interface StreetCaptain {
 const DEFAULT_STATS: SiteStats = {
   committedHouseholds: 191,
   monthlyContributions: 47750,
-  targetHouseholds: 680,
+  targetHouseholds: 891,
   fundingPercent: 28,
 };
 
@@ -74,7 +74,7 @@ const DEFAULT_CAPTAINS: StreetCaptain[] = [
 const faqs = [
   { q: "What is the KCEA enclosure project?", a: "The Kensington Central Enclosure Association (KCEA) is a resident-led initiative to secure our neighbourhood through controlled access points, LPR cameras, and armed response integration. We are applying to the City of Johannesburg under the Security Access Restriction Policy 2018. The project is entirely community-funded and community-driven." },
   { q: "How much does it cost per household?", a: "R250 per month on an ongoing basis, or R3,000 as a once-off upfront payment (equivalent to 12 months paid in advance). The R250 is a permanent monthly levy — it funds Phase 1 right now (consultant, Traffic Impact Study, Council application) and then continues after installation to cover ongoing security staffing, maintenance, and monitoring. Speak to your street captain if cost is a concern." },
-  { q: "How many households have committed so far?", a: "191 households as of 19 May 2026, generating approximately R47,750 per month. Our target is 680+ households." },
+  { q: "How many households have committed so far?", a: "191 households as of 19 May 2026, generating approximately R47,750 per month. There are 891 households in the area in total, and we need a majority of them committed to make the enclosure viable." },
   { q: "What is the timeline for the enclosure to be built?", a: "Phase 1 (now–5 months): Raise R200,000 for the consultant, Traffic Impact Study, and application. Phase 2 (5–8 months): City approval and raise remaining R1.8 million. Phase 3 (8–11 months): Install gates, cameras, and armed response — go live." },
   { q: "How does the application process work?", a: "We apply under the CoJ Security Access Restriction Policy 2018 via the JRA. Requirements: 60% property owner consent, a Traffic Impact Study, and full financial backing." },
   { q: "Will the enclosure close all streets?", a: "No — boom gates will be installed at key entry and exit points only. Emergency vehicles, Pikitup, and public transport maintain access at all times. Pedestrian access is legally required at every point and will be provided." },
@@ -385,7 +385,7 @@ export default function Home() {
         <section id="progress" className="space-y-12">
           <div className="text-center space-y-4 max-w-2xl mx-auto">
             <h2 className="text-3xl md:text-4xl font-bold">Project Progress</h2>
-            <p className="text-muted-foreground">We need approximately {totalTargetHouseholds}+ households to fully fund Phase 1 and the infrastructure. Every commitment brings us closer.</p>
+            <p className="text-muted-foreground">There are {totalTargetHouseholds} households in the area. We need a majority of them committed to fully fund Phase 1 and the infrastructure. Every commitment brings us closer.</p>
           </div>
 
           <div className="grid md:grid-cols-3 gap-6">
