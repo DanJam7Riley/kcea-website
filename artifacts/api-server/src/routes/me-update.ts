@@ -279,7 +279,15 @@ router.post("/me/save", async (req, res) => {
 
   const fullName = typeof body.fullName === "string" ? body.fullName.trim() : "";
   const email = typeof body.email === "string" ? body.email.trim() : "";
-  const street = typeof body.street === "string" ? body.street.trim() : "";
+  const streetRaw = typeof body.street === "string" ? body.street.trim() : "";
+  // Mirror the normalisation in /commitments so resident-edited rows match
+  // the canonical capitalisation used everywhere else.
+  const street = streetRaw
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .split(" ")
+    .map(w => (w ? w[0].toUpperCase() + w.slice(1) : w))
+    .join(" ");
   const houseNumber = typeof body.houseNumber === "string" ? body.houseNumber.trim() : "";
 
   if (!fullName || !email || !street || !houseNumber) {

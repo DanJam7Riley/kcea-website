@@ -55,7 +55,15 @@ router.post("/commitments", async (req, res) => {
   const fullName = typeof body.fullName === "string" ? body.fullName.trim() : "";
   const email = typeof body.email === "string" ? body.email.trim() : "";
   const phone = typeof body.phone === "string" ? body.phone.trim() : "";
-  const street = typeof body.street === "string" ? body.street.trim() : "";
+  const streetRaw = typeof body.street === "string" ? body.street.trim() : "";
+  // Normalise capitalisation on save so "MILDURA" / "mildura" / "Mildura"
+  // all land as one canonical "Mildura" — prevents duplicate-looking streets.
+  const street = streetRaw
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .split(" ")
+    .map(w => (w ? w[0].toUpperCase() + w.slice(1) : w))
+    .join(" ");
   const houseNumber = typeof body.houseNumber === "string" ? body.houseNumber.trim() : "";
   const commitmentType = typeof body.commitmentType === "string" ? body.commitmentType.trim() : "";
 

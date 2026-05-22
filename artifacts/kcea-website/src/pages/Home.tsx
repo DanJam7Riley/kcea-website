@@ -14,7 +14,9 @@ import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Checkbox } from "@/components/ui/checkbox";
 import { useToast } from "@/hooks/use-toast";
+import { STREET_OPTIONS, suggestStreet } from "@/lib/streets";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 
@@ -65,31 +67,9 @@ const DEFAULT_CAPTAINS: StreetCaptain[] = [
   { id: 20, street: "Earls Court",  captain: "Unassigned",      forms: 0,  status: "Critical"    },
 ];
 
-// Streets shown in the commitment + captain application forms.
-// "Earls Court" is a complex located on Nile Street, Kensington — tracked as its own area.
-const STREET_OPTIONS: { value: string; label: string }[] = [
-  { value: "Derby",        label: "Derby" },
-  { value: "Earls Court",  label: "Earls Court (complex on Nile St)" },
-  { value: "Ernest",       label: "Ernest" },
-  { value: "Highlands",    label: "Highlands" },
-  { value: "Leicester",    label: "Leicester" },
-  { value: "Mildura",      label: "Mildura" },
-  { value: "Milner",       label: "Milner" },
-  { value: "Nile",         label: "Nile" },
-  { value: "Nottingham",   label: "Nottingham" },
-  { value: "Nymphe",       label: "Nymphe" },
-  { value: "Ocean",        label: "Ocean" },
-  { value: "Onyx",         label: "Onyx" },
-  { value: "Orion",        label: "Orion" },
-  { value: "Orwell",       label: "Orwell" },
-  { value: "Osprey",       label: "Osprey" },
-  { value: "Panther",      label: "Panther" },
-  { value: "Patrol",       label: "Patrol" },
-  { value: "Phoenix",      label: "Phoenix" },
-  { value: "Protea",       label: "Protea" },
-  { value: "Westmoreland", label: "Westmoreland" },
-  { value: "Other",        label: "My street is not listed" },
-];
+// STREET_OPTIONS is the canonical KCEA street list, imported from
+// `@/lib/streets`. Residents whose street isn't listed tick the
+// "My street isn't listed" checkbox under the dropdown to type it manually.
 
 const faqs = [
   { q: "What is the KCEA enclosure project?", a: "The Kensington Central Enclosure Association (KCEA) is a resident-led initiative to secure our neighbourhood through controlled access points, LPR cameras, and armed response integration. We are applying to the City of Johannesburg under the Security Access Restriction Policy 2018. The project is entirely community-funded and community-driven." },
@@ -113,10 +93,13 @@ export default function Home() {
     fullName: "", email: "", phone: "", street: "", houseNumber: "", commitmentType: "monthly",
   });
   const [customStreet, setCustomStreet] = useState("");
+  const [streetNotListed, setStreetNotListed] = useState(false);
   const [captainAppSubmitted, setCaptainAppSubmitted] = useState(false);
   const [captainAppForm, setCaptainAppForm] = useState({
     fullName: "", street: "", phone: "", email: "", motivation: "",
   });
+  const [capCustomStreet, setCapCustomStreet] = useState("");
+  const [capStreetNotListed, setCapStreetNotListed] = useState(false);
   const [lookupQuery, setLookupQuery] = useState("");
   const [lookupLoading, setLookupLoading] = useState(false);
   const [lookupResult, setLookupResult] = useState<{
@@ -199,10 +182,13 @@ export default function Home() {
 
   const handleFormSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const isOther = formData.street === "Other";
-    const resolvedStreet = isOther ? customStreet.trim() : formData.street;
-    if (isOther && !resolvedStreet) {
+    const resolvedStreet = streetNotListed ? customStreet.trim() : formData.street;
+    if (streetNotListed && !resolvedStreet) {
       toast({ title: "Please type your street name", variant: "destructive" });
+      return;
+    }
+    if (!streetNotListed && !formData.street) {
+      toast({ title: "Please select your street", variant: "destructive" });
       return;
     }
     setDuplicateNotice("");
@@ -231,11 +217,20 @@ export default function Home() {
 
   const handleCaptainAppSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    const resolvedStreet = capStreetNotListed ? capCustomStreet.trim() : captainAppForm.street;
+    if (capStreetNotListed && !resolvedStreet) {
+      toast({ title: "Please type the street name", variant: "destructive" });
+      return;
+    }
+    if (!capStreetNotListed && !captainAppForm.street) {
+      toast({ title: "Please select your street", variant: "destructive" });
+      return;
+    }
     try {
       await fetch(`${BASE}/api/captains`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(captainAppForm),
+        body: JSON.stringify({ ...captainAppForm, street: resolvedStreet }),
       });
     } catch {
       // silently ignore network errors
@@ -562,7 +557,12 @@ export default function Home() {
                       <div className="grid grid-cols-2 gap-4">
                         <div className="space-y-2">
                           <Label htmlFor="street">Street Name</Label>
-                          <Select required value={formData.street} onValueChange={v => setFormData(p => ({ ...p, street: v }))}>
+                          <Select
+                            required={!streetNotListed}
+                            disabled={streetNotListed}
+                            value={formData.street}
+                            onValueChange={v => setFormData(p => ({ ...p, street: v }))}
+                          >
                             <SelectTrigger id="street" className="bg-background border-border" data-testid="select-street">
                               <SelectValue placeholder="Select street" />
                             </SelectTrigger>
@@ -579,23 +579,62 @@ export default function Home() {
                             value={formData.houseNumber} onChange={e => setFormData(p => ({ ...p, houseNumber: e.target.value }))} />
                         </div>
                       </div>
-                      {formData.street === "Other" && (
-                        <div className="space-y-2">
-                          <Label htmlFor="customStreet">Type your street name</Label>
-                          <Input
-                            id="customStreet"
-                            required
-                            placeholder="Type your street name"
-                            className="bg-background border-border"
-                            data-testid="input-custom-street"
-                            value={customStreet}
-                            onChange={e => setCustomStreet(e.target.value)}
-                          />
-                          <p className="text-xs text-muted-foreground">
-                            We'll log this as a new street and follow up with you. Please double-check the spelling.
-                          </p>
-                        </div>
-                      )}
+                      <div className="flex items-center gap-2">
+                        <Checkbox
+                          id="streetNotListed"
+                          checked={streetNotListed}
+                          onCheckedChange={v => {
+                            const checked = v === true;
+                            setStreetNotListed(checked);
+                            if (checked) setFormData(p => ({ ...p, street: "" }));
+                            else setCustomStreet("");
+                          }}
+                          data-testid="checkbox-street-not-listed"
+                        />
+                        <Label htmlFor="streetNotListed" className="text-sm font-normal cursor-pointer">
+                          My street isn't listed
+                        </Label>
+                      </div>
+                      {streetNotListed && (() => {
+                        const suggestion = suggestStreet(customStreet);
+                        return (
+                          <div className="space-y-2">
+                            <Label htmlFor="customStreet">Type your street name</Label>
+                            <Input
+                              id="customStreet"
+                              required
+                              placeholder="Type your street name"
+                              className="bg-background border-border"
+                              data-testid="input-custom-street"
+                              value={customStreet}
+                              onChange={e => setCustomStreet(e.target.value)}
+                            />
+                            {suggestion ? (
+                              <div className="flex items-center justify-between gap-2 text-xs bg-blue-500/10 border border-blue-500/20 rounded-md px-3 py-2">
+                                <span className="text-blue-300">
+                                  Did you mean <span className="font-semibold">{suggestion}</span>?
+                                </span>
+                                <button
+                                  type="button"
+                                  className="text-blue-200 underline underline-offset-2 hover:text-blue-100"
+                                  data-testid="button-accept-street-suggestion"
+                                  onClick={() => {
+                                    setFormData(p => ({ ...p, street: suggestion }));
+                                    setStreetNotListed(false);
+                                    setCustomStreet("");
+                                  }}
+                                >
+                                  Use {suggestion}
+                                </button>
+                              </div>
+                            ) : (
+                              <p className="text-xs text-muted-foreground">
+                                We'll log this as a new street and follow up with you. Please double-check the spelling.
+                              </p>
+                            )}
+                          </div>
+                        );
+                      })()}
                     </div>
                     
                     <div className="space-y-2">
@@ -840,7 +879,12 @@ export default function Home() {
                     </div>
                     <div className="space-y-2">
                       <Label htmlFor="cap-street">Street You Want to Captain</Label>
-                      <Select required value={captainAppForm.street} onValueChange={v => setCaptainAppForm(p => ({ ...p, street: v }))}>
+                      <Select
+                        required={!capStreetNotListed}
+                        disabled={capStreetNotListed}
+                        value={captainAppForm.street}
+                        onValueChange={v => setCaptainAppForm(p => ({ ...p, street: v }))}
+                      >
                         <SelectTrigger id="cap-street" className="bg-background border-border" data-testid="select-cap-street">
                           <SelectValue placeholder="Select street" />
                         </SelectTrigger>
@@ -850,6 +894,55 @@ export default function Home() {
                           ))}
                         </SelectContent>
                       </Select>
+                      <div className="flex items-center gap-2 pt-1">
+                        <Checkbox
+                          id="cap-street-not-listed"
+                          checked={capStreetNotListed}
+                          onCheckedChange={v => {
+                            const checked = v === true;
+                            setCapStreetNotListed(checked);
+                            if (checked) setCaptainAppForm(p => ({ ...p, street: "" }));
+                            else setCapCustomStreet("");
+                          }}
+                          data-testid="checkbox-cap-street-not-listed"
+                        />
+                        <Label htmlFor="cap-street-not-listed" className="text-xs font-normal cursor-pointer">
+                          My street isn't listed
+                        </Label>
+                      </div>
+                      {capStreetNotListed && (() => {
+                        const suggestion = suggestStreet(capCustomStreet);
+                        return (
+                          <div className="space-y-1.5 pt-1">
+                            <Input
+                              required
+                              placeholder="Type your street name"
+                              className="bg-background border-border"
+                              data-testid="input-cap-custom-street"
+                              value={capCustomStreet}
+                              onChange={e => setCapCustomStreet(e.target.value)}
+                            />
+                            {suggestion && (
+                              <div className="flex items-center justify-between gap-2 text-xs bg-blue-500/10 border border-blue-500/20 rounded-md px-3 py-2">
+                                <span className="text-blue-300">
+                                  Did you mean <span className="font-semibold">{suggestion}</span>?
+                                </span>
+                                <button
+                                  type="button"
+                                  className="text-blue-200 underline underline-offset-2 hover:text-blue-100"
+                                  onClick={() => {
+                                    setCaptainAppForm(p => ({ ...p, street: suggestion }));
+                                    setCapStreetNotListed(false);
+                                    setCapCustomStreet("");
+                                  }}
+                                >
+                                  Use {suggestion}
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })()}
                     </div>
                     <div className="space-y-2">
                       <Label htmlFor="cap-phone">Cell Number</Label>

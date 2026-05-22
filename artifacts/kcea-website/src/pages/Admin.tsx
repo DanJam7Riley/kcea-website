@@ -987,16 +987,26 @@ export default function Admin() {
                     <div className="col-span-3"></div>
                   </div>
                   {filtered.map(c => {
-                    const newStreet = isNewStreet(c.street);
+                    const streetMissing = !c.street || !c.street.trim() || c.street.trim().toLowerCase() === "other";
+                    // Only flag as a "new street" worth adding to the list when
+                    // the value is a real street name we haven't seen — never
+                    // for blank/placeholder rows. Those use the "Request Street
+                    // Info" follow-up button below instead.
+                    const newStreet = !streetMissing && isNewStreet(c.street);
+                    const streetInfoDigits = (c.phone || "").replace(/\D/g, "");
+                    const streetInfoNormalised = streetInfoDigits.startsWith("0") ? "27" + streetInfoDigits.slice(1) : streetInfoDigits;
+                    const streetInfoWaUrl = /^\d{10,15}$/.test(streetInfoNormalised)
+                      ? `https://wa.me/${streetInfoNormalised}?text=${encodeURIComponent(`Hi ${(c.fullName || "there").split(/\s+/)[0]}, thank you for committing to the KCEA project! We noticed your street name is missing from your registration. Could you please reply with your street name and house number so we can update your record? Thank you! 🏘️`)}`
+                      : null;
                     return (
-                    <div key={c.id} className={`grid grid-cols-12 gap-3 items-center px-3 py-3 rounded-lg border transition-colors ${newStreet ? "bg-amber-500/5 border-amber-500/40 hover:border-amber-500/60" : "bg-background/50 border-border hover:border-border/80"}`} data-testid={`submission-row-${c.id}`}>
+                    <div key={c.id} className={`grid grid-cols-12 gap-3 items-center px-3 py-3 rounded-lg border transition-colors ${streetMissing ? "bg-red-500/5 border-red-500/40 hover:border-red-500/60" : newStreet ? "bg-amber-500/5 border-amber-500/40 hover:border-amber-500/60" : "bg-background/50 border-border hover:border-border/80"}`} data-testid={`submission-row-${c.id}`}>
                       <div className="col-span-2">
                         <p className="font-medium text-sm">{c.fullName}</p>
                         <p className="text-xs text-muted-foreground">#{c.id}</p>
                       </div>
                       <div className="col-span-2">
                         <div className="flex items-center gap-1.5 flex-wrap">
-                          <p className="text-sm">{c.street}</p>
+                          <p className="text-sm">{streetMissing ? <span className="text-red-300 italic">Street missing</span> : c.street}</p>
                           {newStreet && (
                             <Badge className="bg-amber-500/20 text-amber-400 border-amber-500/30 text-[10px] px-1.5 py-0 h-4" variant="outline" data-testid={`badge-new-street-${c.id}`}>
                               New Street
@@ -1018,6 +1028,23 @@ export default function Admin() {
                           >
                             Add {c.street} to streets list
                           </button>
+                        )}
+                        {streetMissing && (
+                          streetInfoWaUrl ? (
+                            <a
+                              href={streetInfoWaUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="mt-1 inline-block text-[11px] text-red-300 hover:text-red-200 underline underline-offset-2"
+                              data-testid={`btn-request-street-info-${c.id}`}
+                            >
+                              Request Street Info via WhatsApp
+                            </a>
+                          ) : (
+                            <span className="mt-1 inline-block text-[11px] text-muted-foreground italic">
+                              No valid phone for follow-up
+                            </span>
+                          )
                         )}
                       </div>
                       <div className="col-span-2 min-w-0">

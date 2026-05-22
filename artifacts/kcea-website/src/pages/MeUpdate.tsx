@@ -6,19 +6,12 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { CheckCircle2, AlertCircle, Loader2, Shield, Mail, ArrowLeft } from "lucide-react";
+import { STREET_OPTIONS as KCEA_STREETS, STREET_VALUES, suggestStreet } from "@/lib/streets";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 const SITE_NAME = "kcea.co.za";
 
-const STREET_OPTIONS = [
-  "Albemarle Street", "Boundary Road", "Boyes Drive", "Chamberlain Road", "Charles Street",
-  "Clovelly Avenue", "Cumberland Avenue", "Devon Street", "Dorset Street", "Durham Avenue",
-  "Eaton Road", "Essex Avenue", "Hampton Road", "Highbury Road", "Highstead Road",
-  "Kensington Crescent", "Kitchener Avenue", "Lancaster Road", "Lincoln Road", "Norfolk Avenue",
-  "Norwich Avenue", "Plymouth Road", "Queens Road", "Roberts Avenue", "Salisbury Avenue",
-  "Stafford Road", "Surrey Avenue", "Sussex Avenue", "Wellington Avenue", "York Road",
-  "Other",
-];
+const STREET_OPTIONS = KCEA_STREETS;
 
 type Stage = "email" | "code" | "edit" | "done";
 
@@ -83,8 +76,9 @@ export default function MeUpdate() {
       }
       setSessionToken(data.sessionToken);
       setRecord(data.record);
-      setStreetIsOther(!STREET_OPTIONS.includes(data.record.street));
-      if (!STREET_OPTIONS.includes(data.record.street)) {
+      const isCanonical = STREET_VALUES.includes(data.record.street);
+      setStreetIsOther(!isCanonical);
+      if (!isCanonical) {
         setCustomStreet(data.record.street);
       }
       setInfo(null);
@@ -249,14 +243,11 @@ export default function MeUpdate() {
                     <div className="space-y-1.5">
                       <Label htmlFor="street">Street</Label>
                       <Select
-                        value={streetIsOther ? "Other" : record.street}
+                        value={streetIsOther ? "" : record.street}
+                        disabled={streetIsOther}
                         onValueChange={v => {
-                          if (v === "Other") {
-                            setStreetIsOther(true);
-                          } else {
-                            setStreetIsOther(false);
-                            setRecord({ ...record, street: v });
-                          }
+                          setStreetIsOther(false);
+                          setRecord({ ...record, street: v });
                         }}
                       >
                         <SelectTrigger id="street" className="bg-background border-border" data-testid="select-me-street">
@@ -264,7 +255,7 @@ export default function MeUpdate() {
                         </SelectTrigger>
                         <SelectContent>
                           {STREET_OPTIONS.map(s => (
-                            <SelectItem key={s} value={s}>{s}</SelectItem>
+                            <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>
                           ))}
                         </SelectContent>
                       </Select>
@@ -276,14 +267,54 @@ export default function MeUpdate() {
                         className="bg-background border-border" data-testid="input-me-housenumber" />
                     </div>
                   </div>
-                  {streetIsOther && (
-                    <div className="space-y-1.5">
-                      <Label htmlFor="customStreet">Type street name</Label>
-                      <Input id="customStreet" required value={customStreet}
-                        onChange={e => setCustomStreet(e.target.value)}
-                        className="bg-background border-border" />
-                    </div>
-                  )}
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      id="me-street-not-listed"
+                      className="h-4 w-4"
+                      checked={streetIsOther}
+                      onChange={e => {
+                        setStreetIsOther(e.target.checked);
+                        if (e.target.checked) {
+                          setRecord({ ...record, street: "" });
+                        } else {
+                          setCustomStreet("");
+                        }
+                      }}
+                    />
+                    <Label htmlFor="me-street-not-listed" className="text-sm font-normal cursor-pointer">
+                      My street isn't listed
+                    </Label>
+                  </div>
+                  {streetIsOther && (() => {
+                    const suggestion = suggestStreet(customStreet);
+                    return (
+                      <div className="space-y-1.5">
+                        <Label htmlFor="customStreet">Type street name</Label>
+                        <Input id="customStreet" required value={customStreet}
+                          onChange={e => setCustomStreet(e.target.value)}
+                          className="bg-background border-border" />
+                        {suggestion && (
+                          <div className="flex items-center justify-between gap-2 text-xs bg-blue-500/10 border border-blue-500/20 rounded-md px-3 py-2">
+                            <span className="text-blue-300">
+                              Did you mean <span className="font-semibold">{suggestion}</span>?
+                            </span>
+                            <button
+                              type="button"
+                              className="text-blue-200 underline underline-offset-2 hover:text-blue-100"
+                              onClick={() => {
+                                setRecord({ ...record, street: suggestion });
+                                setStreetIsOther(false);
+                                setCustomStreet("");
+                              }}
+                            >
+                              Use {suggestion}
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
                   <p className="text-xs text-muted-foreground">
                     To change your phone number, contact your street captain.
                   </p>
