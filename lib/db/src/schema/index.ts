@@ -135,6 +135,21 @@ export const insertPledgeSchema = createInsertSchema(pledgesTable).omit({ id: tr
 export type Pledge = typeof pledgesTable.$inferSelect;
 export type InsertPledge = z.infer<typeof insertPledgeSchema>;
 
+// OTP codes for the public "Update My Details" self-service flow.
+// One row per requested code; we mark `consumedAt` once it has been
+// successfully redeemed and rely on `expiresAt` for the 10-minute window.
+export const otpCodesTable = pgTable("otp_codes", {
+  id: serial("id").primaryKey(),
+  phoneKey: text("phone_key").notNull(),
+  commitmentId: integer("commitment_id").notNull(),
+  codeHash: text("code_hash").notNull(),
+  expiresAt: timestamp("expires_at").notNull(),
+  attempts: integer("attempts").notNull().default(0),
+  consumedAt: timestamp("consumed_at"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+export type OtpCode = typeof otpCodesTable.$inferSelect;
+
 export const streetHousesTable = pgTable("street_houses", {
   id: serial("id").primaryKey(),
   street: text("street").notNull(),

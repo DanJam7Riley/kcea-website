@@ -8,6 +8,7 @@ import volunteersRouter from "./volunteers";
 import captainPortalRouter from "./captain-portal";
 import settingsRouter from "./settings";
 import adminMigrateRouter from "./admin-migrate";
+import meUpdateRouter from "./me-update";
 
 const router: IRouter = Router();
 
@@ -17,6 +18,7 @@ router.use(settingsRouter);
 router.use(adminMigrateRouter);
 router.use(captainsRouter);
 router.use(commitmentsRouter);
+router.use(meUpdateRouter);
 router.use(pledgesRouter);
 router.use(volunteersRouter);
 router.use(captainPortalRouter);
