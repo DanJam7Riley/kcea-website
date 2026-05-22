@@ -360,7 +360,7 @@ export default function Admin() {
         if (!r.ok) throw new Error("Unauthorized");
         return r.json();
       }),
-    enabled: authed && activeTab === "incomplete",
+    enabled: authed && (activeTab === "incomplete" || activeTab === "stats"),
   });
 
   const updateStats = useMutation({
@@ -745,6 +745,12 @@ export default function Admin() {
     return new Set([...counts.entries()].filter(([, n]) => n > 1).map(([k]) => k));
   }, [commitments]);
 
+  // Total rows that participate in a duplicate set (e.g. 2 identical entries = 2 duplicates).
+  const duplicateRowCount = useMemo(
+    () => commitments.filter(c => duplicateKeys.has(`${c.fullName.toLowerCase()}|${c.street.toLowerCase()}|${c.houseNumber.toLowerCase()}`)).length,
+    [commitments, duplicateKeys],
+  );
+
   if (!authed) {
     return (
       <div className="min-h-screen bg-background text-foreground dark flex items-center justify-center p-4">
@@ -1095,6 +1101,57 @@ export default function Admin() {
                       <p className="text-xs text-muted-foreground">Of {stats?.targetHouseholds ?? "—"} household target</p>
                     </div>
                   </div>
+
+                  <div className="pt-2 space-y-3">
+                    <div className="flex items-baseline justify-between">
+                      <h3 className="text-sm font-semibold">Submissions breakdown</h3>
+                      <span className="text-xs text-muted-foreground">Live from database</span>
+                    </div>
+                    <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+                      <div className="bg-background/50 border border-border rounded-lg p-3 space-y-1" data-testid="stat-total-submissions">
+                        <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Total submissions</p>
+                        <p className="text-2xl font-bold">{commitments.length}</p>
+                        <p className="text-[11px] text-muted-foreground">All rows in the database</p>
+                      </div>
+                      <div className="bg-background/50 border border-border rounded-lg p-3 space-y-1" data-testid="stat-monthly">
+                        <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Monthly</p>
+                        <p className="text-2xl font-bold text-blue-400">{monthlyCount}</p>
+                        <p className="text-[11px] text-muted-foreground">R250 / month each</p>
+                      </div>
+                      <div className="bg-background/50 border border-border rounded-lg p-3 space-y-1" data-testid="stat-onceoff">
+                        <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Once-off</p>
+                        <p className="text-2xl font-bold text-primary">{onceOffCount}</p>
+                        <p className="text-[11px] text-muted-foreground">R3,000 one-time</p>
+                      </div>
+                      <div className="bg-background/50 border border-border rounded-lg p-3 space-y-1" data-testid="stat-incomplete">
+                        <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Incomplete</p>
+                        <p className={`text-2xl font-bold ${incompleteRecords.length > 0 ? "text-amber-400" : ""}`}>
+                          {incompleteLoading ? "…" : incompleteRecords.length}
+                        </p>
+                        <p className="text-[11px] text-muted-foreground">Missing name, phone or email</p>
+                      </div>
+                      <div className="bg-background/50 border border-border rounded-lg p-3 space-y-1 col-span-2 sm:col-span-1" data-testid="stat-duplicates">
+                        <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Duplicates</p>
+                        <p className={`text-2xl font-bold ${duplicateRowCount > 0 ? "text-red-400" : ""}`}>{duplicateRowCount}</p>
+                        <p className="text-[11px] text-muted-foreground">
+                          {duplicateKeys.size > 0
+                            ? `${duplicateRowCount} rows across ${duplicateKeys.size} ${duplicateKeys.size === 1 ? "group" : "groups"}`
+                            : "Same name + street + house"}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="rounded-md border border-blue-500/20 bg-blue-500/5 px-3 py-2.5 text-xs text-blue-200/90 leading-relaxed">
+                      <p className="font-semibold text-blue-300 mb-1">Why the public count may differ from the admin total</p>
+                      <p>
+                        The homepage counter ("households committed") shows the same total submissions number from this database,
+                        but visitors' browsers cache the homepage for a short time, so it can lag by a minute or two after new
+                        submissions, CSV imports or deletions. It also counts every row — including any incomplete or duplicate
+                        entries — so once you clean those up here the public number will drop to match. Refresh the homepage to
+                        force an immediate update.
+                      </p>
+                    </div>
+                  </div>
+
                   <div className="max-w-xs space-y-2">
                     <Label htmlFor="targetHouseholds">Target Households</Label>
                     <Input
