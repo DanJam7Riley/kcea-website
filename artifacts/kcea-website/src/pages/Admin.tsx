@@ -46,6 +46,18 @@ interface IncompleteCommitment {
 }
 
 const UPDATE_BASE_URL = "https://attached-assets-janineriley.replit.app";
+const CAPTAIN_PORTAL_URL = "https://kcea.co.za/captain-login";
+
+function buildCaptainWelcomeMsg(
+  name: string,
+  street: string,
+  phone: string,
+  pin: string | null | undefined,
+  adminWhatsapp: string,
+): string {
+  const pinPart = pin ? `PIN: ${pin}` : "PIN: Your PIN will be sent shortly";
+  return `Hi ${name}, your KCEA Captain Portal login details for ${street}: ${CAPTAIN_PORTAL_URL} | Phone: ${phone} | ${pinPart}. Keep your PIN private. Questions? WhatsApp ${adminWhatsapp}.`;
+}
 
 function makeUpdateLink(id: number, token: string): string {
   return `${UPDATE_BASE_URL}/update?id=${id}&t=${token}`;
@@ -278,6 +290,13 @@ export default function Admin() {
   const isNewStreet = (street: string) => {
     const s = (street ?? "").trim().toLowerCase();
     return s.length > 0 && !knownStreets.has(s);
+  };
+  const streetsForCaptainName = (name: string): string[] => {
+    const n = (name ?? "").trim().toLowerCase();
+    if (!n) return [];
+    return captains
+      .filter(c => (c.captain ?? "").trim().toLowerCase() === n)
+      .map(c => c.street);
   };
 
   const { data: commitments = [], isLoading: commitmentsLoading } = useQuery<Commitment[]>({
@@ -1240,9 +1259,7 @@ export default function Admin() {
                           </button>
                           {isActive && c.captain && c.captain.trim().toLowerCase() !== "unassigned" && (() => {
                             const welcomed = !!c.welcomedAt;
-                            const pinLine = c.pin ? `PIN: ${c.pin}` : "PIN: Your PIN will be sent shortly";
-                            const userLine = c.email ? `Username: ${c.email}` : `Username: ${c.phone ?? ""}`;
-                            const msg = `Hi ${c.captain}, you have been confirmed as Street Captain for ${c.street}!\n\nYour Captain Portal login:\nURL: https://attached-assets-janineriley.replit.app/captain-login\n${userLine}\n${pinLine}\n\nQuestions? WhatsApp Janine on ${adminWhatsapp}.\n- KCEA Team`;
+                            const msg = buildCaptainWelcomeMsg(c.captain, c.street, c.phone ?? "", c.pin, adminWhatsapp);
                             const url = c.phone ? makeResidentWaUrl(c.phone, msg) : null;
                             if (!url) {
                               return (
@@ -1537,64 +1554,74 @@ export default function Admin() {
                                   <div className="flex items-center gap-2 flex-wrap">
                                     <span className="font-mono text-lg font-bold text-primary tracking-[0.3em] bg-primary/10 px-3 py-1 rounded-md">{pinResult.pin}</span>
                                     {p.phone && (() => {
-                                      const msg = `Hi ${p.name}, your KCEA Captain Portal login: https://attached-assets-janineriley.replit.app/captain-login | 📱 Phone number: ${p.phone} | PIN: ${pinResult.pin}. Keep your PIN private. Questions? WhatsApp ${adminWhatsapp}.`;
-                                      const url = makeResidentWaUrl(p.phone, msg);
-                                      if (!url) return null;
-                                      const sent = !!p.pinSentAt;
-                                      const sentDate = sent ? new Date(p.pinSentAt!).toLocaleDateString("en-ZA", { day: "2-digit", month: "short", year: "numeric" }) : null;
-                                      return (
-                                        <div className="flex flex-col items-start gap-0.5">
-                                          <div className="flex items-center gap-1.5">
-                                            {sent ? (
-                                              <>
-                                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs text-muted-foreground bg-muted/40 border border-border">
-                                                  <CheckCircle className="h-3 w-3" />PIN Sent ✓
-                                                </span>
-                                                <a href={url} target="_blank" rel="noopener noreferrer" onPointerDown={(e) => { if (e.button === 0) markPinSent.mutate(p.id); }} onClick={() => markPinSent.mutate(p.id)} className="text-xs text-primary hover:underline">
-                                                  Resend
+                                      const streets = streetsForCaptainName(p.name);
+                                      if (streets.length === 0) return null;
+                                      const multi = streets.length > 1;
+                                      return streets.map(street => {
+                                        const msg = buildCaptainWelcomeMsg(p.name, street, p.phone!, pinResult.pin, adminWhatsapp);
+                                        const url = makeResidentWaUrl(p.phone!, msg);
+                                        if (!url) return null;
+                                        const sent = !!p.pinSentAt;
+                                        const sentDate = sent ? new Date(p.pinSentAt!).toLocaleDateString("en-ZA", { day: "2-digit", month: "short", year: "numeric" }) : null;
+                                        return (
+                                          <div key={street} className="flex flex-col items-start gap-0.5">
+                                            <div className="flex items-center gap-1.5">
+                                              {sent ? (
+                                                <>
+                                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs text-muted-foreground bg-muted/40 border border-border">
+                                                    <CheckCircle className="h-3 w-3" />PIN Sent ✓
+                                                  </span>
+                                                  <a href={url} target="_blank" rel="noopener noreferrer" onPointerDown={(e) => { if (e.button === 0) markPinSent.mutate(p.id); }} onClick={() => markPinSent.mutate(p.id)} className="text-xs text-primary hover:underline">
+                                                    Resend{multi ? ` (${street})` : ""}
+                                                  </a>
+                                                </>
+                                              ) : (
+                                                <a href={url} target="_blank" rel="noopener noreferrer" onPointerDown={(e) => { if (e.button === 0) markPinSent.mutate(p.id); }} onClick={() => markPinSent.mutate(p.id)} className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs text-green-400 bg-green-500/10 border border-green-500/20 hover:bg-green-500/20 transition-colors">
+                                                  <MessageSquare className="h-3 w-3" />Send PIN{multi ? ` (${street})` : ""} via WhatsApp
                                                 </a>
-                                              </>
-                                            ) : (
-                                              <a href={url} target="_blank" rel="noopener noreferrer" onPointerDown={(e) => { if (e.button === 0) markPinSent.mutate(p.id); }} onClick={() => markPinSent.mutate(p.id)} className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs text-green-400 bg-green-500/10 border border-green-500/20 hover:bg-green-500/20 transition-colors">
-                                                <MessageSquare className="h-3 w-3" />Send PIN via WhatsApp
-                                              </a>
-                                            )}
+                                              )}
+                                            </div>
+                                            {sent && <span className="text-[10px] text-muted-foreground">Sent {sentDate}</span>}
                                           </div>
-                                          {sent && <span className="text-[10px] text-muted-foreground">Sent {sentDate}</span>}
-                                        </div>
-                                      );
+                                        );
+                                      });
                                     })()}
                                   </div>
                                 ) : p.pin ? (
                                   <div className="flex items-center gap-2 flex-wrap">
                                     <span className="font-mono text-lg font-bold text-foreground tracking-[0.3em] bg-background border border-border px-3 py-1 rounded-md">{p.pin}</span>
                                     {p.phone && (() => {
-                                      const msg = `Hi ${p.name}, your KCEA Captain Portal login: https://attached-assets-janineriley.replit.app/captain-login | 📱 Phone number: ${p.phone} | PIN: ${p.pin}. Keep your PIN private. Questions? WhatsApp ${adminWhatsapp}.`;
-                                      const url = makeResidentWaUrl(p.phone, msg);
-                                      if (!url) return null;
-                                      const sent = !!p.pinSentAt;
-                                      const sentDate = sent ? new Date(p.pinSentAt!).toLocaleDateString("en-ZA", { day: "2-digit", month: "short", year: "numeric" }) : null;
-                                      return (
-                                        <div className="flex flex-col items-start gap-0.5">
-                                          <div className="flex items-center gap-1.5">
-                                            {sent ? (
-                                              <>
-                                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs text-muted-foreground bg-muted/40 border border-border">
-                                                  <CheckCircle className="h-3 w-3" />PIN Sent ✓
-                                                </span>
-                                                <a href={url} target="_blank" rel="noopener noreferrer" onPointerDown={(e) => { if (e.button === 0) markPinSent.mutate(p.id); }} onClick={() => markPinSent.mutate(p.id)} className="text-xs text-primary hover:underline">
-                                                  Resend
+                                      const streets = streetsForCaptainName(p.name);
+                                      if (streets.length === 0) return null;
+                                      const multi = streets.length > 1;
+                                      return streets.map(street => {
+                                        const msg = buildCaptainWelcomeMsg(p.name, street, p.phone!, p.pin, adminWhatsapp);
+                                        const url = makeResidentWaUrl(p.phone!, msg);
+                                        if (!url) return null;
+                                        const sent = !!p.pinSentAt;
+                                        const sentDate = sent ? new Date(p.pinSentAt!).toLocaleDateString("en-ZA", { day: "2-digit", month: "short", year: "numeric" }) : null;
+                                        return (
+                                          <div key={street} className="flex flex-col items-start gap-0.5">
+                                            <div className="flex items-center gap-1.5">
+                                              {sent ? (
+                                                <>
+                                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs text-muted-foreground bg-muted/40 border border-border">
+                                                    <CheckCircle className="h-3 w-3" />PIN Sent ✓
+                                                  </span>
+                                                  <a href={url} target="_blank" rel="noopener noreferrer" onPointerDown={(e) => { if (e.button === 0) markPinSent.mutate(p.id); }} onClick={() => markPinSent.mutate(p.id)} className="text-xs text-primary hover:underline">
+                                                    Resend{multi ? ` (${street})` : ""}
+                                                  </a>
+                                                </>
+                                              ) : (
+                                                <a href={url} target="_blank" rel="noopener noreferrer" onPointerDown={(e) => { if (e.button === 0) markPinSent.mutate(p.id); }} onClick={() => markPinSent.mutate(p.id)} className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs text-green-400 bg-green-500/10 border border-green-500/20 hover:bg-green-500/20 transition-colors">
+                                                  <MessageSquare className="h-3 w-3" />Send PIN{multi ? ` (${street})` : ""} via WhatsApp
                                                 </a>
-                                              </>
-                                            ) : (
-                                              <a href={url} target="_blank" rel="noopener noreferrer" onPointerDown={(e) => { if (e.button === 0) markPinSent.mutate(p.id); }} onClick={() => markPinSent.mutate(p.id)} className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs text-green-400 bg-green-500/10 border border-green-500/20 hover:bg-green-500/20 transition-colors">
-                                                <MessageSquare className="h-3 w-3" />Send PIN via WhatsApp
-                                              </a>
-                                            )}
+                                              )}
+                                            </div>
+                                            {sent && <span className="text-[10px] text-muted-foreground">Sent {sentDate}</span>}
                                           </div>
-                                          {sent && <span className="text-[10px] text-muted-foreground">Sent {sentDate}</span>}
-                                        </div>
-                                      );
+                                        );
+                                      });
                                     })()}
                                     <Button
                                       size="sm"
@@ -1836,10 +1863,8 @@ export default function Admin() {
         const normalized = phoneDigits.startsWith("0") ? "27" + phoneDigits.slice(1) : phoneDigits;
         const phoneOk = /^\d{10,15}$/.test(normalized);
         const pinOk = !!(wc?.pin && wc.pin.trim());
-        const pinLine = pinOk ? `PIN: ${wc!.pin}` : "PIN: Your PIN will be sent shortly";
-        const userLine = wc?.email ? `Username: ${wc.email}` : `Username: ${wc?.phone ?? ""}`;
         const welcomeMsg = wc
-          ? `Hi ${wc.captain}, you have been confirmed as Street Captain for ${wc.street}!\n\nYour Captain Portal login:\nURL: https://attached-assets-janineriley.replit.app/captain-login\n${userLine}\n${pinLine}\n\nQuestions? WhatsApp Janine on ${adminWhatsapp}.\n- KCEA Team`
+          ? buildCaptainWelcomeMsg(wc.captain, wc.street, wc.phone ?? "", wc.pin, adminWhatsapp)
           : "";
         const waUrl = phoneOk ? `https://wa.me/${normalized}?text=${encodeURIComponent(welcomeMsg)}` : null;
         return (
