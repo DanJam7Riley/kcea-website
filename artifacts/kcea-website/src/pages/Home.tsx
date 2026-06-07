@@ -3,7 +3,7 @@ import { motion } from "framer-motion";
 import { useQuery } from "@tanstack/react-query";
 import { 
   ChevronDown, Check, AlertCircle, Mail, MapPin, Phone, 
-  TrendingUp, Shield, Users, Menu, X, Search, Loader2, Heart
+  TrendingUp, Shield, Users, Menu, X, Search, Loader2, Heart, Landmark
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -982,6 +982,53 @@ export default function Home() {
                   </Button>
                 </form>
               )}
+            </CardContent>
+          </Card>
+        </section>
+
+        {/* How to Pay Section */}
+        <section id="how-to-pay" className="max-w-3xl mx-auto">
+          <div className="text-center space-y-4 mb-10">
+            <Badge className="bg-primary/20 text-primary border-primary/20" variant="outline">Banking Details</Badge>
+            <h2 className="text-3xl md:text-4xl font-bold">How to Pay</h2>
+            <p className="text-muted-foreground leading-relaxed max-w-xl mx-auto">
+              Use the banking details below to make your contribution via EFT.
+            </p>
+          </div>
+
+          <Card className="bg-card border-card-border">
+            <CardContent className="p-8 space-y-6">
+              <div className="flex items-center gap-3">
+                <div className="bg-primary/20 rounded-full p-3">
+                  <Landmark className="h-6 w-6 text-primary" />
+                </div>
+                <h3 className="text-xl font-bold">KCEA Banking Details</h3>
+              </div>
+
+              <dl className="divide-y divide-border rounded-lg border border-border bg-background/50 overflow-hidden">
+                {[
+                  { label: "Bank", value: "FNB (First National Bank)" },
+                  { label: "Account Name", value: "Kensington Central Enclosure Association" },
+                  { label: "Account Number", value: "63213323693" },
+                  { label: "Branch Code", value: "250655" },
+                  { label: "Reference", value: "Your house number + street name (e.g. 14 Nile or 7 Osprey)" },
+                ].map(row => (
+                  <div key={row.label} className="grid grid-cols-1 sm:grid-cols-3 gap-1 sm:gap-4 px-4 py-3">
+                    <dt className="text-sm font-medium text-muted-foreground">{row.label}</dt>
+                    <dd className="sm:col-span-2 text-sm font-semibold text-foreground break-words" data-testid={`banking-${row.label.toLowerCase().replace(/\s+/g, "-")}`}>
+                      {row.value}
+                    </dd>
+                  </div>
+                ))}
+              </dl>
+
+              <div className="flex items-start gap-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3" data-testid="banking-security-notice">
+                <AlertCircle className="h-5 w-5 text-amber-400 shrink-0 mt-0.5" />
+                <p className="text-sm text-amber-200/90 leading-relaxed">
+                  <span aria-hidden="true">⚠️ </span>
+                  Banking details will only ever be shared by your official Street Captain. If you receive payment requests from unknown numbers, do not pay. When in doubt, contact your Street Captain.
+                </p>
+              </div>
             </CardContent>
           </Card>
         </section>
