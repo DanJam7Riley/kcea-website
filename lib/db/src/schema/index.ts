@@ -153,3 +153,17 @@ export const streetHousesTable = pgTable("street_houses", {
   houseNumber: text("house_number").notNull(),
 });
 export type StreetHouse = typeof streetHousesTable.$inferSelect;
+
+// Captain → street assignments. One row per street a resident captains, so a
+// single resident can have multiple active rows. Soft-deleted via isActive=false
+// (we never hard-delete, to keep an audit trail of past assignments).
+export const captainAssignmentsTable = pgTable("captain_assignments", {
+  id: serial("id").primaryKey(),
+  residentId: integer("resident_id")
+    .notNull()
+    .references(() => commitmentsTable.id, { onDelete: "cascade" }),
+  streetName: text("street_name").notNull(),
+  assignedAt: timestamp("assigned_at").notNull().defaultNow(),
+  isActive: boolean("is_active").notNull().default(true),
+});
+export type CaptainAssignment = typeof captainAssignmentsTable.$inferSelect;

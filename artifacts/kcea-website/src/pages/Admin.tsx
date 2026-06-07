@@ -2,7 +2,7 @@ import { useState, useRef, useMemo, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Shield, Save, LogIn, AlertTriangle, CheckCircle, Check, Key, Pencil,
-  Trash2, Download, Upload, Users, ClipboardList, BarChart3, Search, MessageSquare, RefreshCw, Phone, ExternalLink, Settings as SettingsIcon, Heart, Mail
+  Trash2, Download, Upload, Users, UserPlus, ClipboardList, BarChart3, Search, MessageSquare, RefreshCw, Phone, ExternalLink, Settings as SettingsIcon, Heart, Mail, X
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -10,11 +10,11 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
-import { computeStreetStatus, getStreetStatusClass } from "@/lib/streets";
+import { computeStreetStatus, getStreetStatusClass, STREET_OPTIONS } from "@/lib/streets";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 
-const TABS = ["submissions", "stats", "captains", "incomplete", "captain-mgmt", "pledges", "settings"] as const;
+const TABS = ["submissions", "stats", "captains", "manage-captains", "incomplete", "captain-mgmt", "pledges", "settings"] as const;
 type Tab = typeof TABS[number];
 
 interface PledgeRow {
@@ -142,6 +142,16 @@ interface CaptainNote {
   captainName: string;
   note: string;
   updatedAt: string;
+}
+
+interface CaptainAssignmentRow {
+  residentId: number;
+  fullName: string;
+  phone: string;
+  email: string;
+  streets: string[];
+  assignmentIds: number[];
+  pinSet: boolean;
 }
 
 
@@ -522,6 +532,127 @@ export default function Admin() {
     });
   }, [captainProfiles, captains, profileSearch]);
 
+  // ── Manage Captains (assignments) ──────────────────────────────
+  const { data: captainAssignments = [], isLoading: assignmentsLoading } = useQuery<CaptainAssignmentRow[]>({
+    queryKey: ["captain-assignments"],
+    queryFn: () => fetch(`${BASE}/api/captain-assignments`, { headers: authHeaders }).then(async r => {
+      if (!r.ok) throw new Error(await r.text()); return r.json();
+    }),
+    enabled: authed && activeTab === "manage-captains",
+  });
+
+  // The set of streets offered in the multi-select: canonical list plus any
+  // street already on the captain roster (so custom-added streets show up too).
+  const assignableStreets = useMemo(() => {
+    const set = new Set<string>(STREET_OPTIONS.map(o => o.value));
+    for (const c of captains) if (c.street?.trim()) set.add(c.street.trim());
+    return Array.from(set).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
+  }, [captains]);
+
+  const [assignModalOpen, setAssignModalOpen] = useState(false);
+  // When editing, holds the resident row being edited; null means a new assignment.
+  const [editingAssignment, setEditingAssignment] = useState<CaptainAssignmentRow | null>(null);
+  const [assignResidentId, setAssignResidentId] = useState<number | null>(null);
+  const [assignResidentSearch, setAssignResidentSearch] = useState("");
+  const [assignStreets, setAssignStreets] = useState<string[]>([]);
+  const [assignPhone, setAssignPhone] = useState("");
+  const [assignError, setAssignError] = useState("");
+
+  const residentSearchResults = useMemo(() => {
+    const q = assignResidentSearch.trim().toLowerCase();
+    if (!q) return [] as Commitment[];
+    return commitments
+      .filter(c => c.fullName.toLowerCase().includes(q) || c.street.toLowerCase().includes(q))
+      .slice(0, 12);
+  }, [commitments, assignResidentSearch]);
+
+  const selectedResident = useMemo(
+    () => commitments.find(c => c.id === assignResidentId) ?? null,
+    [commitments, assignResidentId],
+  );
+
+  function openAssignModal() {
+    setEditingAssignment(null);
+    setAssignResidentId(null);
+    setAssignResidentSearch("");
+    setAssignStreets([]);
+    setAssignPhone("");
+    setAssignError("");
+    setAssignModalOpen(true);
+  }
+
+  function openEditAssignment(row: CaptainAssignmentRow) {
+    setEditingAssignment(row);
+    setAssignResidentId(row.residentId);
+    setAssignResidentSearch(row.fullName);
+    setAssignStreets(row.streets.slice());
+    setAssignPhone(row.phone ?? "");
+    setAssignError("");
+    setAssignModalOpen(true);
+  }
+
+  function toggleAssignStreet(street: string) {
+    setAssignStreets(prev =>
+      prev.includes(street) ? prev.filter(s => s !== street) : [...prev, street],
+    );
+  }
+
+  const assignCaptain = useMutation({
+    mutationFn: (payload: { residentId: number; streets: string[]; phone: string }) =>
+      fetch(`${BASE}/api/captain-assignments`, {
+        method: "POST",
+        headers: { ...authHeaders, "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      }).then(async r => { if (!r.ok) throw new Error((await r.json().catch(() => ({ error: "Failed" }))).error ?? "Failed"); return r.json(); }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["captain-assignments"] });
+      qc.invalidateQueries({ queryKey: ["captains"] });
+      qc.invalidateQueries({ queryKey: ["captain-profiles"] });
+      qc.invalidateQueries({ queryKey: ["commitments"] });
+      setAssignModalOpen(false);
+    },
+    onError: (err: Error) => setAssignError(err.message || "Failed to assign captain"),
+  });
+
+  const updateAssignment = useMutation({
+    mutationFn: ({ residentId, ...payload }: { residentId: number; streets: string[]; phone: string }) =>
+      fetch(`${BASE}/api/captain-assignments/${residentId}`, {
+        method: "PUT",
+        headers: { ...authHeaders, "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      }).then(async r => { if (!r.ok) throw new Error((await r.json().catch(() => ({ error: "Failed" }))).error ?? "Failed"); return r.json(); }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["captain-assignments"] });
+      qc.invalidateQueries({ queryKey: ["captains"] });
+      qc.invalidateQueries({ queryKey: ["captain-profiles"] });
+      qc.invalidateQueries({ queryKey: ["commitments"] });
+      setAssignModalOpen(false);
+    },
+    onError: (err: Error) => setAssignError(err.message || "Failed to update assignment"),
+  });
+
+  const removeAssignment = useMutation({
+    mutationFn: (residentId: number) =>
+      fetch(`${BASE}/api/captain-assignments/${residentId}`, { method: "DELETE", headers: authHeaders })
+        .then(async r => { if (!r.ok) throw new Error(await r.text()); return r.json(); }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["captain-assignments"] });
+      qc.invalidateQueries({ queryKey: ["captains"] });
+    },
+  });
+
+  function saveAssignment() {
+    setAssignError("");
+    if (!assignResidentId) { setAssignError("Please select a resident."); return; }
+    if (assignStreets.length === 0) { setAssignError("Please select at least one street."); return; }
+    const payload = { residentId: assignResidentId, streets: assignStreets, phone: assignPhone.trim() };
+    if (editingAssignment) {
+      updateAssignment.mutate(payload);
+    } else {
+      assignCaptain.mutate(payload);
+    }
+  }
+
   const { data: siteSettings } = useQuery<{ notifyWhatsapp: string | null }>({
     queryKey: ["site-settings"],
     queryFn: () => fetch(`${BASE}/api/settings`, { headers: authHeaders }).then(async r => {
@@ -895,7 +1026,7 @@ export default function Admin() {
 
         {/* Tabs */}
         <div className="flex gap-1 border-b border-border">
-          {([ ["submissions", ClipboardList, "Submissions"], ["stats", BarChart3, "Stats"], ["captains", Users, "Captains"], ["incomplete", AlertTriangle, "Incomplete"], ["captain-mgmt", Key, "Captain Portal"], ["pledges", Heart, "Pledges"], ["settings", SettingsIcon, "Settings"] ] as const).map(([tab, Icon, label]) => (
+          {([ ["submissions", ClipboardList, "Submissions"], ["stats", BarChart3, "Stats"], ["captains", Users, "Captains"], ["manage-captains", UserPlus, "Manage Captains"], ["incomplete", AlertTriangle, "Incomplete"], ["captain-mgmt", Key, "Captain Portal"], ["pledges", Heart, "Pledges"], ["settings", SettingsIcon, "Settings"] ] as const).map(([tab, Icon, label]) => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
@@ -1543,6 +1674,91 @@ export default function Admin() {
                   <p className="text-xs text-muted-foreground pt-2">
                     Click the role badge to toggle a captain's status instantly. Click <Save className="inline h-3 w-3" /> to save name/forms/status edits.
                   </p>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        )}
+        {/* Manage Captains Tab */}
+        {activeTab === "manage-captains" && (
+          <Card className="bg-card border-card-border">
+            <CardHeader>
+              <div className="flex items-start justify-between gap-3 flex-wrap">
+                <div>
+                  <CardTitle className="text-xl">Manage Captains</CardTitle>
+                  <p className="text-sm text-muted-foreground mt-1">
+                    Assign residents as street captains. A captain can cover multiple streets. Assigning here also wires up their Captain Portal login.
+                  </p>
+                </div>
+                <Button onClick={openAssignModal} className="gap-1.5" data-testid="button-assign-captain">
+                  <UserPlus className="h-4 w-4" /> Assign Captain
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent>
+              {assignmentsLoading ? (
+                <p className="text-muted-foreground text-sm">Loading…</p>
+              ) : captainAssignments.length === 0 ? (
+                <p className="text-sm text-muted-foreground px-4 py-8 text-center">
+                  No captain assignments yet. Click <span className="font-medium text-foreground">Assign Captain</span> to add one.
+                </p>
+              ) : (
+                <div className="space-y-3">
+                  <div className="grid grid-cols-12 gap-3 px-4 py-2 text-xs font-medium text-muted-foreground uppercase tracking-wide border-b border-border">
+                    <div className="col-span-2">Name</div>
+                    <div className="col-span-3">Street(s)</div>
+                    <div className="col-span-2">Phone</div>
+                    <div className="col-span-2">Email</div>
+                    <div className="col-span-1">PIN</div>
+                    <div className="col-span-2 text-right">Actions</div>
+                  </div>
+                  {captainAssignments.map(row => {
+                    const isRemoving = removeAssignment.isPending && removeAssignment.variables === row.residentId;
+                    return (
+                      <div
+                        key={row.residentId}
+                        className="grid grid-cols-12 gap-3 items-center p-4 rounded-lg bg-background/50 border border-border"
+                        data-testid={`assignment-row-${row.residentId}`}
+                      >
+                        <div className="col-span-2 font-semibold text-sm">{row.fullName}</div>
+                        <div className="col-span-3 text-sm">{row.streets.join(", ")}</div>
+                        <div className="col-span-2 text-sm text-muted-foreground">{row.phone || "—"}</div>
+                        <div className="col-span-2 text-sm text-muted-foreground truncate" title={row.email}>{row.email || "—"}</div>
+                        <div className="col-span-1">
+                          {row.pinSet ? (
+                            <Badge className="bg-green-500/20 text-green-400 border-green-500/30 text-xs" variant="outline">PIN set</Badge>
+                          ) : (
+                            <Badge className="bg-muted text-muted-foreground border-border text-xs" variant="outline">No PIN</Badge>
+                          )}
+                        </div>
+                        <div className="col-span-2 flex items-center justify-end gap-1.5">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="h-8 gap-1"
+                            onClick={() => openEditAssignment(row)}
+                            data-testid={`button-edit-assignment-${row.residentId}`}
+                          >
+                            <Pencil className="h-3.5 w-3.5" /> Edit
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="h-8 gap-1 text-red-400 border-red-500/30 hover:bg-red-500/10 hover:text-red-300"
+                            disabled={isRemoving}
+                            onClick={() => {
+                              if (window.confirm(`Remove ${row.fullName} as captain for ${row.streets.join(", ")}? This deactivates the assignment (it is not deleted).`)) {
+                                removeAssignment.mutate(row.residentId);
+                              }
+                            }}
+                            data-testid={`button-remove-assignment-${row.residentId}`}
+                          >
+                            <Trash2 className="h-3.5 w-3.5" /> Remove
+                          </Button>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               )}
             </CardContent>
@@ -2374,6 +2590,133 @@ export default function Admin() {
             >
               <Save className="h-4 w-4" />
               {updateCommitment.isPending ? "Saving…" : "Save changes"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Assign / Edit Captain Modal */}
+      <Dialog open={assignModalOpen} onOpenChange={(o) => { if (!o) setAssignModalOpen(false); }}>
+        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>{editingAssignment ? "Edit Captain Assignment" : "Assign Captain"}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            {/* Resident picker */}
+            <div className="space-y-1.5">
+              <Label>Resident</Label>
+              {selectedResident ? (
+                <div className="flex items-center justify-between gap-2 rounded-md border border-border bg-background px-3 py-2">
+                  <div className="text-sm">
+                    <span className="font-medium">{selectedResident.fullName}</span>
+                    <span className="text-muted-foreground"> — {selectedResident.street} No. {selectedResident.houseNumber}</span>
+                  </div>
+                  {!editingAssignment && (
+                    <button
+                      type="button"
+                      onClick={() => { setAssignResidentId(null); setAssignResidentSearch(""); }}
+                      className="text-muted-foreground hover:text-foreground"
+                      aria-label="Clear resident"
+                      data-testid="button-clear-resident"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  )}
+                </div>
+              ) : (
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
+                  <Input
+                    type="text"
+                    value={assignResidentSearch}
+                    onChange={e => setAssignResidentSearch(e.target.value)}
+                    placeholder="Search resident by name or street…"
+                    className="pl-9 bg-background border-border"
+                    data-testid="input-resident-search"
+                  />
+                  {assignResidentSearch.trim() !== "" && (
+                    <div className="mt-1 max-h-48 overflow-y-auto rounded-md border border-border bg-background">
+                      {residentSearchResults.length === 0 ? (
+                        <p className="px-3 py-2 text-sm text-muted-foreground">No residents found.</p>
+                      ) : (
+                        residentSearchResults.map(r => (
+                          <button
+                            key={r.id}
+                            type="button"
+                            onClick={() => {
+                              setAssignResidentId(r.id);
+                              setAssignResidentSearch(r.fullName);
+                              if (!assignPhone.trim()) setAssignPhone(r.phone ?? "");
+                            }}
+                            className="block w-full text-left px-3 py-2 text-sm hover:bg-muted/50"
+                            data-testid={`resident-option-${r.id}`}
+                          >
+                            <span className="font-medium">{r.fullName}</span>
+                            <span className="text-muted-foreground"> — {r.street} No. {r.houseNumber}</span>
+                          </button>
+                        ))
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Streets multi-select */}
+            <div className="space-y-1.5">
+              <Label>Street(s) — select one or more</Label>
+              <div className="max-h-48 overflow-y-auto rounded-md border border-border bg-background p-2 grid grid-cols-2 gap-1">
+                {assignableStreets.map(street => {
+                  const checked = assignStreets.includes(street);
+                  return (
+                    <label
+                      key={street}
+                      className="flex items-center gap-2 px-2 py-1.5 rounded text-sm cursor-pointer hover:bg-muted/50"
+                      data-testid={`street-option-${street}`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() => toggleAssignStreet(street)}
+                        className="h-4 w-4 rounded border-border accent-primary"
+                      />
+                      <span className={checked ? "font-medium" : ""}>{street}</span>
+                    </label>
+                  );
+                })}
+              </div>
+              {assignStreets.length > 0 && (
+                <p className="text-xs text-muted-foreground">Selected: {assignStreets.slice().sort((a, b) => a.localeCompare(b)).join(", ")}</p>
+              )}
+            </div>
+
+            {/* Phone */}
+            <div className="space-y-1.5">
+              <Label htmlFor="assign-phone">Phone</Label>
+              <Input
+                id="assign-phone"
+                type="tel"
+                value={assignPhone}
+                onChange={e => setAssignPhone(e.target.value)}
+                placeholder="Captain's contact number"
+                className="bg-background border-border"
+                data-testid="input-assign-phone"
+              />
+              <p className="text-xs text-muted-foreground">Pre-filled from the resident's record. Used for their Captain Portal login.</p>
+            </div>
+
+            {assignError && (
+              <p className="text-sm text-red-400" data-testid="text-assign-error">{assignError}</p>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setAssignModalOpen(false)} data-testid="button-cancel-assign">Cancel</Button>
+            <Button
+              onClick={saveAssignment}
+              disabled={assignCaptain.isPending || updateAssignment.isPending}
+              data-testid="button-save-assign"
+            >
+              {assignCaptain.isPending || updateAssignment.isPending ? "Saving…" : editingAssignment ? "Save Changes" : "Assign Captain"}
             </Button>
           </DialogFooter>
         </DialogContent>

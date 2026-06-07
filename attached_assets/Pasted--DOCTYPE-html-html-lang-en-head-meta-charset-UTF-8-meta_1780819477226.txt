@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Replit Prompt — Captain Assignment</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: Arial, sans-serif; background: #f0f2f5; padding: 20px; }
+  h1 { color: #1a3c5e; font-size: 20px; margin-bottom: 6px; }
+  .subtitle { color: #666; font-size: 13px; margin-bottom: 24px; }
+  .card { background: white; border-radius: 12px; padding: 20px; margin-bottom: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+  .card-title { font-size: 15px; font-weight: bold; color: #1a3c5e; margin-bottom: 4px; }
+  .card-desc { font-size: 12px; color: #888; margin-bottom: 14px; }
+  .message-box { background: #f7f9fb; border: 1px solid #e0e6ed; border-radius: 8px; padding: 14px; font-size: 13px; line-height: 1.7; white-space: pre-wrap; color: #222; font-family: monospace; }
+  .copy-btn { margin-top: 12px; width: 100%; padding: 12px; background: #1a3c5e; color: white; border: none; border-radius: 8px; font-size: 14px; font-weight: bold; cursor: pointer; transition: background 0.2s; }
+  .copy-btn:hover { background: #25508a; }
+  .copy-btn.copied { background: #25D366; }
+</style>
+</head>
+<body>
+
+<h1>🛠️ Replit Prompt — Captain Assignment Feature</h1>
+<p class="subtitle">Paste this into Replit AI to build the captain assignment system</p>
+
+<div class="card">
+  <div class="card-title">📋 Replit Prompt — Assign Captains from Existing Residents</div>
+  <div class="card-desc">Paste this exactly into Replit AI — do not change anything</div>
+  <div class="message-box" id="msg1">I need to add a Street Captain assignment feature to the admin panel. Here is exactly what is needed:
+
+1. IN THE ADMIN PANEL — ADD A "MANAGE CAPTAINS" SECTION:
+- Add a new tab or section in the admin panel called "Manage Captains"
+- Show a table of all current street captain assignments (name, street(s), phone, email, PIN status)
+
+2. ADD AN "ASSIGN CAPTAIN" BUTTON:
+- Add an "Assign Captain" button that opens a modal or form
+- The form must have:
+  a) A searchable dropdown to select an existing resident from the commitments/residents table (search by name or street)
+  b) A multi-select dropdown to assign them to ONE OR MORE streets (they can captain multiple streets)
+  c) A phone number field (pre-filled from their resident record if available)
+  d) A save button
+
+3. DATABASE CHANGES NEEDED:
+- Create a captain_assignments table (if it does not already exist) with columns:
+  resident_id (foreign key to residents/commitments table),
+  street_name (text),
+  assigned_at (timestamp),
+  is_active (boolean, default true)
+- A single resident can have multiple rows in this table (one per street they captain)
+- When a captain is assigned, also create or update their record in the street_captains table so their portal login still works
+
+4. EDITING AND REMOVING:
+- Each row in the Manage Captains table should have an Edit button (to change streets or phone) and a Remove button (to deactivate that assignment — do not delete the record, just set is_active = false)
+
+5. DISPLAY:
+- In the captain assignments table, if a person captains multiple streets, show all their streets listed in one row, comma separated
+- Show a green badge if they have a PIN set, grey badge if not
+
+Do not change anything else on the site. Do not touch the resident commitment forms, the public pages, or the existing captain portal login. Only add this new functionality to the admin panel.</div>
+  <button class="copy-btn" onclick="copyMsg('msg1', this)">📋 Copy Replit Prompt</button>
+</div>
+
+<script>
+function copyMsg(id, btn) {
+  const text = document.getElementById(id).innerText;
+  navigator.clipboard.writeText(text).then(() => {
+    const original = btn.textContent;
+    btn.textContent = '✅ Copied! Now paste into Replit AI';
+    btn.classList.add('copied');
+    setTimeout(() => {
+      btn.textContent = original;
+      btn.classList.remove('copied');
+    }, 3000);
+  });
+}
+</script>
+</body>
+</html>
