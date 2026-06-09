@@ -136,19 +136,53 @@ async function ensureJanineRileyCommitment(): Promise<void> {
   logger.info({ email, street }, "Inserted missing Janine Riley commitment");
 }
 
-/** Seed real household targets per street. Only updates rows still at default (30) so admin edits are preserved. */
+/** Canonical verified household counts per street (as of 2026-06). Applied to any
+ *  freshly-seeded row still at the schema default (30); admin edits are preserved. */
 const STREET_TARGET_DEFAULTS: Record<string, number> = {
-  Derby: 60, Orion: 40, Protea: 40, Osprey: 35, Onyx: 35, Nile: 35,
-  Ocean: 30, Nymphe: 30, Westmoreland: 30,
-  Highlands: 25, Leicester: 25, Panther: 25, Nottingham: 25, Phoenix: 25, Orwell: 25,
-  Mildura: 20, Ernest: 20, Milner: 20, Patrol: 20,
+  Derby: 95, Highlands: 161, Nottingham: 66, Nile: 65, Orion: 52, Protea: 47,
+  Orwell: 43, Leicester: 40, Onyx: 39, Panther: 38, Osprey: 37, Phoenix: 37,
+  Patrol: 37, Westmoreland: 36, Ocean: 33, Nymphe: 32,
+  Mildura: 20, Milner: 20, Ernest: 13,
 };
+
+/** One-time correction: streets whose targets moved from an earlier estimate to the
+ *  verified count. Maps the previous estimate -> new value so we only overwrite rows
+ *  still sitting at the old estimate (idempotent; preserves any admin edits). */
+const STREET_TARGET_CORRECTIONS: Array<{ street: string; from: number; to: number }> = [
+  { street: "Derby",        from: 30, to: 95  },
+  { street: "Derby",        from: 60, to: 95  }, // safety net: earlier seed default was 60
+  { street: "Highlands",    from: 25, to: 161 },
+  { street: "Leicester",    from: 25, to: 40  },
+  { street: "Nottingham",   from: 25, to: 66  },
+  { street: "Nile",         from: 35, to: 65  },
+  { street: "Nymphe",       from: 30, to: 32  },
+  { street: "Ocean",        from: 30, to: 33  },
+  { street: "Onyx",         from: 35, to: 39  },
+  { street: "Orion",        from: 40, to: 52  },
+  { street: "Orwell",       from: 25, to: 43  },
+  { street: "Osprey",       from: 35, to: 37  },
+  { street: "Panther",      from: 25, to: 38  },
+  { street: "Patrol",       from: 20, to: 37  },
+  { street: "Phoenix",      from: 25, to: 37  },
+  { street: "Protea",       from: 40, to: 47  },
+  { street: "Westmoreland", from: 30, to: 36  },
+  { street: "Ernest",       from: 20, to: 13  },
+];
+
 async function ensureStreetTargets(): Promise<void> {
+  // Fresh-seed rows still at the schema default (30) get the canonical target.
   for (const [street, target] of Object.entries(STREET_TARGET_DEFAULTS)) {
     await db
       .update(streetCaptainsTable)
       .set({ targetHouseholds: target })
       .where(and(eq(streetCaptainsTable.street, street), eq(streetCaptainsTable.targetHouseholds, 30)));
+  }
+  // Correct rows still sitting at the earlier estimate (skips admin-edited rows).
+  for (const { street, from, to } of STREET_TARGET_CORRECTIONS) {
+    await db
+      .update(streetCaptainsTable)
+      .set({ targetHouseholds: to })
+      .where(and(eq(streetCaptainsTable.street, street), eq(streetCaptainsTable.targetHouseholds, from)));
   }
 }
 
