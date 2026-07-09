@@ -62,7 +62,5 @@ externalPort = 3002
 [nix]
 channel = "stable-25_05"
 
-[userenv]
-
-[userenv.shared]
-RESEND_API_KEY = "re_GdVv7d28_G7XqQVosLHHzq2eQeYfdExbb"
+# Secrets such as RESEND_API_KEY must not be committed here.
+# Set them in Replit Secrets or Vercel environment variables instead.
