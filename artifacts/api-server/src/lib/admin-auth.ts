@@ -1,20 +1,34 @@
 import { db, siteSettingsTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 
-const DEFAULT_PRIMARY_PASSWORD = "kcea2026";
-const DEFAULT_SECONDARY_PASSWORD = "kcea2026b";
+// No hardcoded admin credentials. Every value below must come from the
+// environment — if any are missing, the server fails to start rather than
+// silently falling back to a default that could be guessed.
+function requireEnv(name: string): string {
+  const value = process.env[name];
+  if (!value || !value.trim()) {
+    throw new Error(
+      `Missing required environment variable: ${name}. Set it before starting ` +
+        "the server — there is no default admin credential.",
+    );
+  }
+  return value;
+}
 
-export const PRIMARY_USERNAME = process.env.ADMIN_USERNAME ?? "kcea-admin";
-export const SECONDARY_USERNAME = process.env.ADMIN_USERNAME_2 ?? "kcea-admin2";
+export const PRIMARY_USERNAME = requireEnv("ADMIN_USERNAME");
+export const SECONDARY_USERNAME = requireEnv("ADMIN_USERNAME_2");
+
+const primaryPassword = requireEnv("ADMIN_PASSWORD");
+const envSecondaryPassword = requireEnv("ADMIN_PASSWORD_2");
 
 export function getPrimaryPassword(): string {
-  return process.env.ADMIN_PASSWORD ?? DEFAULT_PRIMARY_PASSWORD;
+  return primaryPassword;
 }
 
 let cachedSecondary: string | null = null;
 
 function fallbackSecondary(): string {
-  return process.env.ADMIN_PASSWORD_2 ?? DEFAULT_SECONDARY_PASSWORD;
+  return envSecondaryPassword;
 }
 
 export function getSecondaryPasswordSync(): string {
