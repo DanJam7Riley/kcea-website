@@ -2,7 +2,7 @@ import { useState, useRef, useMemo, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Shield, Save, LogIn, AlertTriangle, CheckCircle, Check, Key, Pencil,
-  Trash2, Download, Upload, Users, UserPlus, ClipboardList, BarChart3, Search, MessageSquare, RefreshCw, Phone, ExternalLink, Settings as SettingsIcon, Heart, Mail, X
+  Trash2, Download, Upload, Users, UserPlus, ClipboardList, BarChart3, Search, MessageSquare, RefreshCw, Phone, ExternalLink, Settings as SettingsIcon, Heart, Mail, X, FileText, Plus, Printer
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -14,7 +14,7 @@ import { computeStreetStatus, getStreetStatusClass, STREET_OPTIONS } from "@/lib
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 
-const TABS = ["submissions", "stats", "captains", "manage-captains", "incomplete", "captain-mgmt", "pledges", "settings"] as const;
+const TABS = ["submissions", "stats", "captains", "manage-captains", "incomplete", "captain-mgmt", "pledges", "invoices", "settings"] as const;
 type Tab = typeof TABS[number];
 
 interface PledgeRow {
@@ -29,6 +29,33 @@ interface PledgeRow {
   message: string | null;
   commitmentId: number | null;
   createdAt: string;
+}
+
+interface InvoiceLineItem {
+  id: number;
+  description: string;
+  quantity: number;
+  unitAmount: number;
+  amount: number;
+}
+
+interface InvoiceRow {
+  id: number;
+  invoiceNumber: string;
+  commitmentId: number | null;
+  billToName: string;
+  billToStreet: string | null;
+  billToHouseNumber: string | null;
+  billToEmail: string | null;
+  invoiceDate: string;
+  dueDate: string;
+  status: string;
+  subtotal: number;
+  total: number;
+  notes: string | null;
+  createdBy: string | null;
+  createdAt: string;
+  lineItems?: InvoiceLineItem[];
 }
 
 interface IncompleteCommitment {
@@ -388,6 +415,111 @@ export default function Admin() {
       qc.invalidateQueries({ queryKey: ["pledge-total"] });
     },
   });
+
+  const [invoiceSearch, setInvoiceSearch] = useState("");
+  const [invoiceStatusFilter, setInvoiceStatusFilter] = useState<string>("");
+  const [showCreateInvoice, setShowCreateInvoice] = useState(false);
+  const [newInvoiceBillToName, setNewInvoiceBillToName] = useState("");
+  const [newInvoiceStreet, setNewInvoiceStreet] = useState("");
+  const [newInvoiceHouseNumber, setNewInvoiceHouseNumber] = useState("");
+  const [newInvoiceEmail, setNewInvoiceEmail] = useState("");
+  const [newInvoiceDueInDays, setNewInvoiceDueInDays] = useState(7);
+  const [newInvoiceLineItems, setNewInvoiceLineItems] = useState<{ description: string; quantity: number; unitAmount: number }[]>([
+    { description: "Monthly household contribution", quantity: 1, unitAmount: 250 },
+  ]);
+
+  const { data: invoices = [], isLoading: invoicesLoading } = useQuery<InvoiceRow[]>({
+    queryKey: ["invoices", invoiceSearch, invoiceStatusFilter],
+    queryFn: () => {
+      const params = new URLSearchParams();
+      if (invoiceSearch) params.set("q", invoiceSearch);
+      if (invoiceStatusFilter) params.set("status", invoiceStatusFilter);
+      return fetch(`${BASE}/api/invoices?${params.toString()}`, { headers: authHeaders }).then(async r => {
+        if (!r.ok) throw new Error("Unauthorized");
+        return r.json();
+      });
+    },
+    enabled: authed && activeTab === "invoices",
+  });
+
+  const createInvoice = useMutation({
+    mutationFn: () =>
+      fetch(`${BASE}/api/invoices`, {
+        method: "POST",
+        headers: { ...authHeaders, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          billToName: newInvoiceBillToName,
+          billToStreet: newInvoiceStreet || undefined,
+          billToHouseNumber: newInvoiceHouseNumber || undefined,
+          billToEmail: newInvoiceEmail || undefined,
+          dueInDays: newInvoiceDueInDays,
+          lineItems: newInvoiceLineItems,
+        }),
+      }).then(async r => {
+        if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error ?? "Failed to create invoice");
+        return r.json();
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["invoices"] });
+      setShowCreateInvoice(false);
+      setNewInvoiceBillToName("");
+      setNewInvoiceStreet("");
+      setNewInvoiceHouseNumber("");
+      setNewInvoiceEmail("");
+      setNewInvoiceDueInDays(7);
+      setNewInvoiceLineItems([{ description: "Monthly household contribution", quantity: 1, unitAmount: 250 }]);
+    },
+  });
+
+  const updateInvoiceStatus = useMutation({
+    mutationFn: ({ id, status }: { id: number; status: string }) =>
+      fetch(`${BASE}/api/invoices/${id}/status`, {
+        method: "PUT",
+        headers: { ...authHeaders, "Content-Type": "application/json" },
+        body: JSON.stringify({ status }),
+      }).then(async r => {
+        if (!r.ok) throw new Error(await r.text());
+        return r.json();
+      }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["invoices"] }),
+  });
+
+  function invoiceStatusBadgeClass(status: string): string {
+    switch (status) {
+      case "paid": return "bg-green-500/20 text-green-400 border-green-500/20";
+      case "overdue": return "bg-red-500/20 text-red-400 border-red-500/20";
+      case "cancelled": return "bg-muted text-muted-foreground border-transparent";
+      case "draft": return "bg-blue-500/20 text-blue-400 border-blue-500/20";
+      default: return "bg-amber-500/20 text-amber-400 border-amber-500/20"; // unpaid
+    }
+  }
+
+  function printInvoice(inv: InvoiceRow) {
+    const w = window.open("", "_blank");
+    if (!w) return;
+    const items = (inv.lineItems ?? [])
+      .map(
+        li =>
+          `<tr><td style="padding:6px 8px;border-bottom:1px solid #ddd;">${li.description}</td><td style="padding:6px 8px;border-bottom:1px solid #ddd;text-align:center;">${li.quantity}</td><td style="padding:6px 8px;border-bottom:1px solid #ddd;text-align:right;">R${li.unitAmount.toLocaleString("en-ZA")}</td><td style="padding:6px 8px;border-bottom:1px solid #ddd;text-align:right;">R${li.amount.toLocaleString("en-ZA")}</td></tr>`,
+      )
+      .join("");
+    w.document.write(`<!DOCTYPE html><html><head><title>${inv.invoiceNumber}</title></head><body style="font-family:sans-serif;max-width:640px;margin:2rem auto;">
+      <h1 style="margin-bottom:0;">Kensington Central Enclosure Association</h1>
+      <p style="color:#666;margin-top:4px;">FNB Gold Business Account 63213323693</p>
+      <h2>Invoice ${inv.invoiceNumber}</h2>
+      <p><strong>Bill to:</strong> ${inv.billToName}${inv.billToStreet ? ` — ${inv.billToStreet} ${inv.billToHouseNumber ?? ""}` : ""}</p>
+      <p>Invoice date: ${new Date(inv.invoiceDate).toLocaleDateString("en-ZA")} &nbsp; | &nbsp; Due: ${new Date(inv.dueDate).toLocaleDateString("en-ZA")}</p>
+      <table style="width:100%;border-collapse:collapse;margin-top:1rem;">
+        <thead><tr><th style="text-align:left;padding:6px 8px;border-bottom:2px solid #333;">Description</th><th style="padding:6px 8px;border-bottom:2px solid #333;">Qty</th><th style="text-align:right;padding:6px 8px;border-bottom:2px solid #333;">Unit</th><th style="text-align:right;padding:6px 8px;border-bottom:2px solid #333;">Amount</th></tr></thead>
+        <tbody>${items}</tbody>
+      </table>
+      <p style="text-align:right;font-size:1.2rem;margin-top:1rem;"><strong>Total: R${inv.total.toLocaleString("en-ZA")}</strong></p>
+      <p style="color:#666;font-size:0.85rem;">Payment reference: house number + street name. Status: ${inv.status}.</p>
+      </body></html>`);
+    w.document.close();
+    w.focus();
+    w.print();
+  }
 
   const { data: incompleteRecords = [], isLoading: incompleteLoading } = useQuery<IncompleteCommitment[]>({
     queryKey: ["incomplete-commitments"],
@@ -1026,7 +1158,7 @@ export default function Admin() {
 
         {/* Tabs */}
         <div className="flex gap-1 border-b border-border">
-          {([ ["submissions", ClipboardList, "Submissions"], ["stats", BarChart3, "Stats"], ["captains", Users, "Captains"], ["manage-captains", UserPlus, "Manage Captains"], ["incomplete", AlertTriangle, "Incomplete"], ["captain-mgmt", Key, "Captain Portal"], ["pledges", Heart, "Pledges"], ["settings", SettingsIcon, "Settings"] ] as const).map(([tab, Icon, label]) => (
+          {([ ["submissions", ClipboardList, "Submissions"], ["stats", BarChart3, "Stats"], ["captains", Users, "Captains"], ["manage-captains", UserPlus, "Manage Captains"], ["incomplete", AlertTriangle, "Incomplete"], ["captain-mgmt", Key, "Captain Portal"], ["pledges", Heart, "Pledges"], ["invoices", FileText, "Invoices"], ["settings", SettingsIcon, "Settings"] ] as const).map(([tab, Icon, label]) => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
@@ -2254,6 +2386,213 @@ export default function Admin() {
               )}
             </CardContent>
           </Card>
+        )}
+
+        {/* Invoices Tab */}
+        {activeTab === "invoices" && (
+          <Card className="bg-card border-card-border">
+            <CardHeader className="flex flex-row items-center justify-between gap-4 pb-4 flex-wrap">
+              <div>
+                <CardTitle className="text-xl flex items-center gap-2"><FileText className="h-5 w-5 text-primary" /> Invoices</CardTitle>
+                <p className="text-xs text-muted-foreground mt-1">
+                  {invoices.length} invoice{invoices.length === 1 ? "" : "s"}
+                  {" · "}Outstanding: <span className="font-bold text-primary">R{invoices.filter(i => i.status === "unpaid" || i.status === "overdue").reduce((s, i) => s + i.total, 0).toLocaleString("en-ZA")}</span>
+                </p>
+              </div>
+              <Button size="sm" className="gap-1.5" onClick={() => setShowCreateInvoice(true)} data-testid="create-invoice-button">
+                <Plus className="h-4 w-4" /> New invoice
+              </Button>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="flex gap-2 flex-wrap">
+                <div className="relative flex-1 min-w-[200px]">
+                  <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    placeholder="Search by name, street, or invoice number..."
+                    className="pl-8"
+                    value={invoiceSearch}
+                    onChange={e => setInvoiceSearch(e.target.value)}
+                    data-testid="invoice-search"
+                  />
+                </div>
+                <select
+                  className="rounded-md border border-input bg-background px-3 py-2 text-sm"
+                  value={invoiceStatusFilter}
+                  onChange={e => setInvoiceStatusFilter(e.target.value)}
+                  data-testid="invoice-status-filter"
+                >
+                  <option value="">All statuses</option>
+                  <option value="draft">Draft</option>
+                  <option value="unpaid">Unpaid</option>
+                  <option value="paid">Paid</option>
+                  <option value="overdue">Overdue</option>
+                  <option value="cancelled">Cancelled</option>
+                </select>
+              </div>
+
+              {invoicesLoading ? (
+                <p className="text-sm text-muted-foreground">Loading invoices...</p>
+              ) : invoices.length === 0 ? (
+                <p className="text-sm text-muted-foreground py-8 text-center">No invoices yet. Create the first one above.</p>
+              ) : (
+                <div className="space-y-2">
+                  {invoices.map(inv => (
+                    <div key={inv.id} className="rounded-lg border border-card-border p-4 space-y-2" data-testid={`invoice-row-${inv.id}`}>
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div className="space-y-1">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="font-mono text-sm font-semibold">{inv.invoiceNumber}</span>
+                            <span className="font-semibold">{inv.billToName}</span>
+                            {inv.billToStreet && (
+                              <Badge className="bg-blue-500/20 text-blue-400 border-blue-500/20 text-xs" variant="outline">
+                                {inv.billToStreet} {inv.billToHouseNumber}
+                              </Badge>
+                            )}
+                            <Badge className={`${invoiceStatusBadgeClass(inv.status)} text-xs`} variant="outline">
+                              {inv.status}
+                            </Badge>
+                          </div>
+                          <div className="text-xs text-muted-foreground flex flex-wrap gap-x-4 gap-y-1">
+                            <span>Invoiced {new Date(inv.invoiceDate).toLocaleDateString("en-ZA")}</span>
+                            <span>Due {new Date(inv.dueDate).toLocaleDateString("en-ZA")}</span>
+                            <span className="font-semibold text-foreground">R{inv.total.toLocaleString("en-ZA")}</span>
+                            {inv.createdBy && <span>By {inv.createdBy}</span>}
+                          </div>
+                        </div>
+                        <div className="flex gap-2 shrink-0 items-center">
+                          <select
+                            className="rounded-md border border-input bg-background px-2 py-1.5 text-xs"
+                            value={inv.status}
+                            onChange={e => updateInvoiceStatus.mutate({ id: inv.id, status: e.target.value })}
+                            data-testid={`invoice-status-select-${inv.id}`}
+                          >
+                            <option value="draft">Draft</option>
+                            <option value="unpaid">Unpaid</option>
+                            <option value="paid">Paid</option>
+                            <option value="overdue">Overdue</option>
+                            <option value="cancelled">Cancelled</option>
+                          </select>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="gap-1.5"
+                            onClick={async () => {
+                              const full = await fetch(`${BASE}/api/invoices/${inv.id}`, { headers: authHeaders }).then(r => r.json());
+                              printInvoice(full);
+                            }}
+                            data-testid={`print-invoice-${inv.id}`}
+                          >
+                            <Printer className="h-3.5 w-3.5" /> Print
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        )}
+
+        {showCreateInvoice && (
+          <Dialog open={showCreateInvoice} onOpenChange={setShowCreateInvoice}>
+            <DialogContent className="max-w-lg">
+              <DialogHeader>
+                <DialogTitle>New invoice</DialogTitle>
+              </DialogHeader>
+              <div className="space-y-3">
+                <div>
+                  <Label>Bill to (name)</Label>
+                  <Input value={newInvoiceBillToName} onChange={e => setNewInvoiceBillToName(e.target.value)} data-testid="invoice-billto-name" />
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <Label>Street</Label>
+                    <Input value={newInvoiceStreet} onChange={e => setNewInvoiceStreet(e.target.value)} data-testid="invoice-street" />
+                  </div>
+                  <div>
+                    <Label>House number</Label>
+                    <Input value={newInvoiceHouseNumber} onChange={e => setNewInvoiceHouseNumber(e.target.value)} data-testid="invoice-house-number" />
+                  </div>
+                </div>
+                <div>
+                  <Label>Email (optional)</Label>
+                  <Input value={newInvoiceEmail} onChange={e => setNewInvoiceEmail(e.target.value)} data-testid="invoice-email" />
+                </div>
+                <div>
+                  <Label>Due in (days)</Label>
+                  <Input type="number" value={newInvoiceDueInDays} onChange={e => setNewInvoiceDueInDays(parseInt(e.target.value, 10) || 7)} data-testid="invoice-due-days" />
+                </div>
+                <div className="space-y-2">
+                  <Label>Line items</Label>
+                  {newInvoiceLineItems.map((li, idx) => (
+                    <div key={idx} className="flex gap-2 items-center">
+                      <Input
+                        className="flex-1"
+                        placeholder="Description"
+                        value={li.description}
+                        onChange={e => {
+                          const next = [...newInvoiceLineItems];
+                          next[idx] = { ...next[idx], description: e.target.value };
+                          setNewInvoiceLineItems(next);
+                        }}
+                      />
+                      <Input
+                        className="w-16"
+                        type="number"
+                        value={li.quantity}
+                        onChange={e => {
+                          const next = [...newInvoiceLineItems];
+                          next[idx] = { ...next[idx], quantity: parseInt(e.target.value, 10) || 1 };
+                          setNewInvoiceLineItems(next);
+                        }}
+                      />
+                      <Input
+                        className="w-24"
+                        type="number"
+                        placeholder="R"
+                        value={li.unitAmount}
+                        onChange={e => {
+                          const next = [...newInvoiceLineItems];
+                          next[idx] = { ...next[idx], unitAmount: parseInt(e.target.value, 10) || 0 };
+                          setNewInvoiceLineItems(next);
+                        }}
+                      />
+                      {newInvoiceLineItems.length > 1 && (
+                        <Button size="sm" variant="outline" onClick={() => setNewInvoiceLineItems(newInvoiceLineItems.filter((_, i) => i !== idx))}>
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                      )}
+                    </div>
+                  ))}
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="gap-1.5"
+                    onClick={() => setNewInvoiceLineItems([...newInvoiceLineItems, { description: "", quantity: 1, unitAmount: 0 }])}
+                  >
+                    <Plus className="h-3.5 w-3.5" /> Add line item
+                  </Button>
+                </div>
+                <p className="text-right font-semibold">
+                  Total: R{newInvoiceLineItems.reduce((s, li) => s + li.quantity * li.unitAmount, 0).toLocaleString("en-ZA")}
+                </p>
+                {createInvoice.isError && (
+                  <p className="text-sm text-red-400">{(createInvoice.error as Error).message}</p>
+                )}
+              </div>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setShowCreateInvoice(false)}>Cancel</Button>
+                <Button
+                  disabled={!newInvoiceBillToName.trim() || newInvoiceLineItems.some(li => !li.description.trim()) || createInvoice.isPending}
+                  onClick={() => createInvoice.mutate()}
+                  data-testid="submit-create-invoice"
+                >
+                  {createInvoice.isPending ? "Creating..." : "Create invoice"}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
         )}
 
         {/* Settings Tab */}
