@@ -167,3 +167,40 @@ export const captainAssignmentsTable = pgTable("captain_assignments", {
   isActive: boolean("is_active").notNull().default(true),
 });
 export type CaptainAssignment = typeof captainAssignmentsTable.$inferSelect;
+
+// ── Invoicing ──────────────────────────────────────────────────
+// Minimal invoicing: one invoice per household, made up of line items.
+// Numbering format: KCEA-{year}-{3-digit sequence}, e.g. KCEA-2026-001.
+// "createdBy" records which admin login generated the invoice (digital
+// sign-off — no physical signature field, per KCEA's own instruction).
+export const invoicesTable = pgTable("invoices", {
+  id: serial("id").primaryKey(),
+  invoiceNumber: text("invoice_number").notNull().unique(),
+  commitmentId: integer("commitment_id").references(() => commitmentsTable.id),
+  billToName: text("bill_to_name").notNull(),
+  billToStreet: text("bill_to_street"),
+  billToHouseNumber: text("bill_to_house_number"),
+  billToEmail: text("bill_to_email"),
+  invoiceDate: timestamp("invoice_date").notNull().defaultNow(),
+  dueDate: timestamp("due_date").notNull(),
+  status: text("status").notNull().default("unpaid"), // draft | unpaid | paid | overdue | cancelled
+  subtotal: integer("subtotal").notNull().default(0),
+  total: integer("total").notNull().default(0),
+  notes: text("notes"),
+  createdBy: text("created_by"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+export type Invoice = typeof invoicesTable.$inferSelect;
+
+export const invoiceLineItemsTable = pgTable("invoice_line_items", {
+  id: serial("id").primaryKey(),
+  invoiceId: integer("invoice_id")
+    .notNull()
+    .references(() => invoicesTable.id, { onDelete: "cascade" }),
+  description: text("description").notNull(),
+  quantity: integer("quantity").notNull().default(1),
+  unitAmount: integer("unit_amount").notNull(),
+  amount: integer("amount").notNull(),
+});
+export type InvoiceLineItem = typeof invoiceLineItemsTable.$inferSelect;
