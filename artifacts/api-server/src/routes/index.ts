@@ -10,6 +10,7 @@ import captainPortalRouter from "./captain-portal";
 import settingsRouter from "./settings";
 import adminMigrateRouter from "./admin-migrate";
 import meUpdateRouter from "./me-update";
+import invoicesRouter from "./invoices";
 
 const router: IRouter = Router();
 
@@ -22,6 +23,7 @@ router.use(captainAssignmentsRouter);
 router.use(commitmentsRouter);
 router.use(meUpdateRouter);
 router.use(pledgesRouter);
+router.use(invoicesRouter);
 router.use(volunteersRouter);
 router.use(captainPortalRouter);
 
