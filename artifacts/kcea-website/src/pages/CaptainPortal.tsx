@@ -339,8 +339,7 @@ export default function CaptainPortal() {
       <div className="min-h-screen bg-background flex flex-col">
         <header className="border-b border-border bg-background/95 px-6 py-4 flex items-center justify-between">
           <div className="flex items-center gap-2 text-primary font-bold text-lg">
-            <Shield className="h-5 w-5" />
-            KCEA
+            <img src={`${BASE}/kcea-logo.png`} alt="KCEA" className="h-7 w-auto" />
           </div>
           <a href="/" className="text-sm text-muted-foreground hover:text-primary transition-colors flex items-center gap-1.5">
             <ArrowLeft className="h-4 w-4" />
@@ -440,8 +439,7 @@ export default function CaptainPortal() {
         <div className="container mx-auto max-w-5xl px-4 py-3 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="flex items-center gap-2 text-primary font-bold">
-              <Shield className="h-5 w-5" />
-              KCEA
+              <img src={`${BASE}/kcea-logo.png`} alt="KCEA" className="h-7 w-auto" />
             </div>
             <span className="text-border">|</span>
             <div>

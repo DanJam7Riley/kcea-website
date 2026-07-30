@@ -270,8 +270,7 @@ export default function Home() {
       <header className="sticky top-0 z-50 w-full border-b border-border/40 bg-background/80 backdrop-blur supports-[backdrop-filter]:bg-background/60">
         <div className="container mx-auto px-4 h-16 flex items-center justify-between">
           <div className="flex items-center gap-2 text-primary font-bold text-xl tracking-tight" data-testid="logo-brand">
-            <Shield className="h-6 w-6" />
-            KCEA
+            <img src={`${BASE}/kcea-logo.png`} alt="KCEA" className="h-8 w-auto" />
           </div>
           
           <nav className="hidden md:flex items-center gap-6 text-sm font-medium text-muted-foreground">
