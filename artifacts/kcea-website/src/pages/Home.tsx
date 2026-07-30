@@ -315,7 +315,7 @@ export default function Home() {
               <Badge variant="outline" className="bg-accent/10 text-accent border-accent/20">Action Required</Badge>
               <span className="text-sm text-muted-foreground">Kensington Central Enclosure</span>
             </div>
-            <h1 className="text-4xl md:text-6xl font-bold leading-tight tracking-tighter">
+            <h1 className="font-display uppercase text-4xl md:text-6xl leading-tight tracking-tight">
               Securing our <span className="text-primary">streets</span>,<br />protecting our <span className="text-primary">families</span>.
             </h1>
             <p className="text-lg text-muted-foreground max-w-lg">
@@ -376,7 +376,7 @@ export default function Home() {
         {/* Progress Section */}
         <section id="progress" className="space-y-12">
           <div className="text-center space-y-4 max-w-2xl mx-auto">
-            <h2 className="text-3xl md:text-4xl font-bold">Project Progress</h2>
+            <h2 className="font-display uppercase text-3xl md:text-4xl tracking-tight">Project Progress</h2>
             <p className="text-muted-foreground">There are {totalTargetHouseholds} households in the area. We need a majority of them committed to fully fund Phase 1 and the infrastructure. Every commitment brings us closer.</p>
           </div>
 
@@ -460,7 +460,7 @@ export default function Home() {
         {/* Commitment Section */}
         <section id="commit" className="space-y-12">
           <div className="text-center space-y-4 max-w-2xl mx-auto">
-            <h2 className="text-3xl md:text-4xl font-bold">Make Your Commitment</h2>
+            <h2 className="font-display uppercase text-3xl md:text-4xl tracking-tight">Make Your Commitment</h2>
             <p className="text-muted-foreground">Join {totalCommittedHouseholds} of your neighbours. We offer both monthly and once-off contribution options.</p>
           </div>
 
@@ -778,7 +778,7 @@ export default function Home() {
         {/* Street Captains Section */}
         <section id="captains" className="space-y-12">
           <div className="text-center space-y-4 max-w-2xl mx-auto">
-            <h2 className="text-3xl md:text-4xl font-bold">Street Captains</h2>
+            <h2 className="font-display uppercase text-3xl md:text-4xl tracking-tight">Street Captains</h2>
             <p className="text-muted-foreground">Connect with your street captain to submit forms or ask questions. Want to volunteer? Let us know.</p>
           </div>
 
@@ -832,7 +832,7 @@ export default function Home() {
         <section id="volunteer" className="max-w-3xl mx-auto">
           <div className="text-center space-y-4 mb-10">
             <Badge className="bg-primary/20 text-primary border-primary/20" variant="outline">Get Involved</Badge>
-            <h2 className="text-3xl md:text-4xl font-bold">Become a Street Captain</h2>
+            <h2 className="font-display uppercase text-3xl md:text-4xl tracking-tight">Become a Street Captain</h2>
             <p className="text-muted-foreground leading-relaxed max-w-xl mx-auto">
               Street captains do door-to-door visits, answer neighbour questions, and report commitment numbers back to the committee. It takes about 2–3 hours per month.
             </p>
@@ -989,7 +989,7 @@ export default function Home() {
         <section id="how-to-pay" className="max-w-3xl mx-auto">
           <div className="text-center space-y-4 mb-10">
             <Badge className="bg-primary/20 text-primary border-primary/20" variant="outline">Banking Details</Badge>
-            <h2 className="text-3xl md:text-4xl font-bold">How to Pay</h2>
+            <h2 className="font-display uppercase text-3xl md:text-4xl tracking-tight">How to Pay</h2>
             <p className="text-muted-foreground leading-relaxed max-w-xl mx-auto">
               Use the banking details below to make your contribution via EFT.
             </p>
@@ -1035,7 +1035,7 @@ export default function Home() {
         {/* FAQ Section */}
         <section id="faq" className="space-y-12 max-w-4xl mx-auto">
           <div className="text-center space-y-4">
-            <h2 className="text-3xl md:text-4xl font-bold">Frequently Asked Questions</h2>
+            <h2 className="font-display uppercase text-3xl md:text-4xl tracking-tight">Frequently Asked Questions</h2>
             <p className="text-muted-foreground">Everything you need to know about the KCEA project.</p>
           </div>
 
