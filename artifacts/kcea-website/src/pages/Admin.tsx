@@ -509,14 +509,15 @@ export default function Admin() {
   const [bulkSelected, setBulkSelected] = useState<Set<number>>(new Set());
   const [bulkResult, setBulkResult] = useState<{ createdCount: number; skippedCount: number } | null>(null);
 
-  const { data: bulkPreviewData, isLoading: bulkPreviewLoading, refetch: refetchBulkPreview } = useQuery<{ eligible: BulkPreviewRow[]; alreadyInvoicedThisMonth: number }>({
+  const { data: bulkPreviewData, isLoading: bulkPreviewLoading, isError: bulkPreviewIsError, error: bulkPreviewError, refetch: refetchBulkPreview } = useQuery<{ eligible: BulkPreviewRow[]; alreadyInvoicedThisMonth: number }>({
     queryKey: ["invoices-bulk-preview"],
     queryFn: () =>
       fetch(`${BASE}/api/invoices/bulk-preview`, { headers: authHeaders }).then(async r => {
-        if (!r.ok) throw new Error(await r.text());
+        if (!r.ok) throw new Error(`${r.status}: ${await r.text()}`);
         return r.json();
       }),
     enabled: authed && showBulkInvoice,
+    retry: false,
   });
 
   function openBulkInvoiceDialog() {
@@ -2608,6 +2609,14 @@ export default function Admin() {
                 </p>
                 {bulkPreviewLoading ? (
                   <p className="text-sm text-muted-foreground py-6 text-center">Loading eligible households...</p>
+                ) : bulkPreviewIsError ? (
+                  <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-4 space-y-2">
+                    <p className="text-sm font-semibold text-red-300">Couldn't load the preview</p>
+                    <p className="text-xs text-red-200/90 break-words">{(bulkPreviewError as Error).message}</p>
+                    <Button size="sm" variant="outline" className="gap-1.5" onClick={() => refetchBulkPreview()}>
+                      <RefreshCw className="h-3.5 w-3.5" /> Retry
+                    </Button>
+                  </div>
                 ) : !bulkPreviewData || bulkPreviewData.eligible.length === 0 ? (
                   <p className="text-sm text-muted-foreground py-6 text-center">
                     Nothing to invoice — every monthly household already has an invoice for this month.
