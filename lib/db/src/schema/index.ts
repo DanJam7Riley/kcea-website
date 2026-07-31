@@ -204,3 +204,23 @@ export const invoiceLineItemsTable = pgTable("invoice_line_items", {
   amount: integer("amount").notNull(),
 });
 export type InvoiceLineItem = typeof invoiceLineItemsTable.$inferSelect;
+
+// ── Payments ───────────────────────────────────────────────────
+// Records money actually received against an invoice (manual, admin-entered
+// after reconciling against the bank statement — EFT only for now). Multiple
+// payments can apply to one invoice (partial payments). Invoice status is
+// derived from these (unpaid → partial → paid), not set manually.
+export const paymentsTable = pgTable("payments", {
+    id: serial("id").primaryKey(),
+    invoiceId: integer("invoice_id")
+          .notNull()
+          .references(() => invoicesTable.id),
+    amount: integer("amount").notNull(),
+    paymentDate: timestamp("payment_date").notNull().defaultNow(),
+    method: text("method").notNull().default("eft"),
+    reference: text("reference"),
+    notes: text("notes"),
+    recordedBy: text("recorded_by"),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+export type Payment = typeof paymentsTable.$inferSelect;
