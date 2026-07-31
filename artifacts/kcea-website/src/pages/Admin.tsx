@@ -423,7 +423,7 @@ export default function Admin() {
   const [newInvoiceStreet, setNewInvoiceStreet] = useState("");
   const [newInvoiceHouseNumber, setNewInvoiceHouseNumber] = useState("");
   const [newInvoiceEmail, setNewInvoiceEmail] = useState("");
-  const [newInvoiceDueInDays, setNewInvoiceDueInDays] = useState(7);
+  const [newInvoiceDueInDays, setNewInvoiceDueInDays] = useState(15);
   const [newInvoiceLineItems, setNewInvoiceLineItems] = useState<{ description: string; quantity: number; unitAmount: number }[]>([
     { description: "Monthly household contribution", quantity: 1, unitAmount: 250 },
   ]);
@@ -466,7 +466,7 @@ export default function Admin() {
       setNewInvoiceStreet("");
       setNewInvoiceHouseNumber("");
       setNewInvoiceEmail("");
-      setNewInvoiceDueInDays(7);
+      setNewInvoiceDueInDays(15);
       setNewInvoiceLineItems([{ description: "Monthly household contribution", quantity: 1, unitAmount: 250 }]);
     },
   });
@@ -482,6 +482,81 @@ export default function Admin() {
         return r.json();
       }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["invoices"] }),
+  });
+
+  const deleteInvoice = useMutation({
+    mutationFn: (id: number) =>
+      fetch(`${BASE}/api/invoices/${id}`, { method: "DELETE", headers: authHeaders }).then(async r => {
+        if (!r.ok) throw new Error(await r.text());
+        return r.json();
+      }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["invoices"] }),
+  });
+
+  // ── Bulk invoice generation ──────────────────────────────────────
+  // Preview lists every "monthly" commitment not yet invoiced this calendar
+  // month, with the rate that would apply. Admin deselects anyone who
+  // shouldn't be invoiced (e.g. already paid their once-off) before confirming.
+  interface BulkPreviewRow {
+    commitmentId: number;
+    fullName: string;
+    street: string;
+    houseNumber: string;
+    email: string;
+    rate: number;
+  }
+  const [showBulkInvoice, setShowBulkInvoice] = useState(false);
+  const [bulkSelected, setBulkSelected] = useState<Set<number>>(new Set());
+  const [bulkResult, setBulkResult] = useState<{ createdCount: number; skippedCount: number } | null>(null);
+
+  const { data: bulkPreviewData, isLoading: bulkPreviewLoading, isError: bulkPreviewIsError, error: bulkPreviewError, refetch: refetchBulkPreview } = useQuery<{ eligible: BulkPreviewRow[]; alreadyInvoicedThisMonth: number }>({
+    queryKey: ["invoices-bulk-preview"],
+    queryFn: () =>
+      fetch(`${BASE}/api/invoices/bulk-preview`, { headers: authHeaders }).then(async r => {
+        if (!r.ok) throw new Error(`${r.status}: ${await r.text()}`);
+        return r.json();
+      }),
+    enabled: authed && showBulkInvoice,
+    retry: false,
+  });
+
+  function openBulkInvoiceDialog() {
+    setBulkResult(null);
+    setShowBulkInvoice(true);
+  }
+
+  // Default every eligible household to checked once the preview loads.
+  useEffect(() => {
+    if (bulkPreviewData?.eligible) {
+      setBulkSelected(new Set(bulkPreviewData.eligible.map(r => r.commitmentId)));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bulkPreviewData]);
+
+  function toggleBulkSelected(id: number) {
+    setBulkSelected(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  const bulkGenerate = useMutation({
+    mutationFn: () =>
+      fetch(`${BASE}/api/invoices/bulk-generate`, {
+        method: "POST",
+        headers: { ...authHeaders, "Content-Type": "application/json" },
+        body: JSON.stringify({ commitmentIds: Array.from(bulkSelected) }),
+      }).then(async r => {
+        if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error ?? "Failed to generate invoices");
+        return r.json() as Promise<{ created: string[]; skipped: { commitmentId: number; reason: string }[]; createdCount: number; skippedCount: number }>;
+      }),
+    onSuccess: (data) => {
+      qc.invalidateQueries({ queryKey: ["invoices"] });
+      setBulkResult({ createdCount: data.createdCount, skippedCount: data.skippedCount });
+      refetchBulkPreview();
+    },
   });
 
   function invoiceStatusBadgeClass(status: string): string {
@@ -521,6 +596,7 @@ export default function Admin() {
       </table>
       <p style="text-align:right;font-size:1.2rem;margin-top:1rem;color:#FA0377;"><strong>Total: R${inv.total.toLocaleString("en-ZA")}</strong></p>
       <p style="color:#aaa;font-size:0.85rem;">Payment reference: house number + street name. Status: ${inv.status}.</p>
+      <p style="color:#aaa;font-size:0.85rem;margin-top:0.75rem;">Authorised by: Kensington Central Enclosure Association</p>
       </body></html>`);
     w.document.close();
     w.focus();
@@ -2405,9 +2481,14 @@ export default function Admin() {
                   {" · "}Outstanding: <span className="font-bold text-primary">R{invoices.filter(i => i.status === "unpaid" || i.status === "overdue").reduce((s, i) => s + i.total, 0).toLocaleString("en-ZA")}</span>
                 </p>
               </div>
-              <Button size="sm" className="gap-1.5" onClick={() => setShowCreateInvoice(true)} data-testid="create-invoice-button">
-                <Plus className="h-4 w-4" /> New invoice
-              </Button>
+              <div className="flex gap-2">
+                <Button size="sm" variant="outline" className="gap-1.5" onClick={openBulkInvoiceDialog} data-testid="bulk-invoice-button">
+                  <FileText className="h-4 w-4" /> Generate monthly invoices
+                </Button>
+                <Button size="sm" className="gap-1.5" onClick={() => setShowCreateInvoice(true)} data-testid="create-invoice-button">
+                  <Plus className="h-4 w-4" /> New invoice
+                </Button>
+              </div>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="flex gap-2 flex-wrap">
@@ -2490,6 +2571,20 @@ export default function Admin() {
                           >
                             <Printer className="h-3.5 w-3.5" /> Print
                           </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="gap-1.5 text-red-400 hover:text-red-300"
+                            onClick={() => {
+                              if (window.confirm(`Delete invoice ${inv.invoiceNumber}? This can't be undone.`)) {
+                                deleteInvoice.mutate(inv.id);
+                              }
+                            }}
+                            disabled={deleteInvoice.isPending}
+                            data-testid={`delete-invoice-${inv.id}`}
+                          >
+                            <Trash2 className="h-3.5 w-3.5" /> Delete
+                          </Button>
                         </div>
                       </div>
                     </div>
@@ -2498,6 +2593,97 @@ export default function Admin() {
               )}
             </CardContent>
           </Card>
+        )}
+
+        {showBulkInvoice && (
+          <Dialog open={showBulkInvoice} onOpenChange={setShowBulkInvoice}>
+            <DialogContent className="max-w-2xl">
+              <DialogHeader>
+                <DialogTitle>Generate monthly invoices</DialogTitle>
+              </DialogHeader>
+              <div className="space-y-3">
+                <p className="text-sm text-muted-foreground">
+                  Every household committed to the monthly R250 (R150 for Earls Court) that hasn't already
+                  been invoiced this calendar month. Uncheck anyone who shouldn't get one this round
+                  (e.g. already paid their R3,000 once-off).
+                </p>
+                {bulkPreviewLoading ? (
+                  <p className="text-sm text-muted-foreground py-6 text-center">Loading eligible households...</p>
+                ) : bulkPreviewIsError ? (
+                  <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-4 space-y-2">
+                    <p className="text-sm font-semibold text-red-300">Couldn't load the preview</p>
+                    <p className="text-xs text-red-200/90 break-words">{(bulkPreviewError as Error).message}</p>
+                    <Button size="sm" variant="outline" className="gap-1.5" onClick={() => refetchBulkPreview()}>
+                      <RefreshCw className="h-3.5 w-3.5" /> Retry
+                    </Button>
+                  </div>
+                ) : !bulkPreviewData || bulkPreviewData.eligible.length === 0 ? (
+                  <p className="text-sm text-muted-foreground py-6 text-center">
+                    Nothing to invoice — every monthly household already has an invoice for this month.
+                  </p>
+                ) : (
+                  <>
+                    <div className="flex items-center justify-between text-xs text-muted-foreground">
+                      <span>{bulkSelected.size} of {bulkPreviewData.eligible.length} selected</span>
+                      <div className="flex gap-3">
+                        <button
+                          type="button"
+                          className="underline underline-offset-2 hover:text-foreground"
+                          onClick={() => setBulkSelected(new Set(bulkPreviewData.eligible.map(r => r.commitmentId)))}
+                        >
+                          Select all
+                        </button>
+                        <button
+                          type="button"
+                          className="underline underline-offset-2 hover:text-foreground"
+                          onClick={() => setBulkSelected(new Set())}
+                        >
+                          Deselect all
+                        </button>
+                      </div>
+                    </div>
+                    <div className="max-h-80 overflow-y-auto space-y-1 border border-border rounded-lg p-2">
+                      {bulkPreviewData.eligible.map(row => (
+                        <label
+                          key={row.commitmentId}
+                          className="flex items-center gap-3 px-2 py-1.5 rounded-md hover:bg-background/50 cursor-pointer text-sm"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={bulkSelected.has(row.commitmentId)}
+                            onChange={() => toggleBulkSelected(row.commitmentId)}
+                          />
+                          <span className="flex-1">
+                            {row.fullName} — {row.street} {row.houseNumber}
+                          </span>
+                          <span className="text-muted-foreground">R{row.rate}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </>
+                )}
+                {bulkResult && (
+                  <p className="text-sm text-green-400">
+                    Created {bulkResult.createdCount} invoice{bulkResult.createdCount === 1 ? "" : "s"}
+                    {bulkResult.skippedCount > 0 ? ` (${bulkResult.skippedCount} skipped)` : ""}.
+                  </p>
+                )}
+                {bulkGenerate.isError && (
+                  <p className="text-sm text-red-400">{(bulkGenerate.error as Error).message}</p>
+                )}
+              </div>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setShowBulkInvoice(false)}>Close</Button>
+                <Button
+                  disabled={bulkSelected.size === 0 || bulkGenerate.isPending}
+                  onClick={() => bulkGenerate.mutate()}
+                  data-testid="submit-bulk-generate"
+                >
+                  {bulkGenerate.isPending ? "Generating..." : `Generate ${bulkSelected.size || ""} invoice${bulkSelected.size === 1 ? "" : "s"}`}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
         )}
 
         {showCreateInvoice && (
@@ -2527,7 +2713,7 @@ export default function Admin() {
                 </div>
                 <div>
                   <Label>Due in (days)</Label>
-                  <Input type="number" value={newInvoiceDueInDays} onChange={e => setNewInvoiceDueInDays(parseInt(e.target.value, 10) || 7)} data-testid="invoice-due-days" />
+                  <Input type="number" value={newInvoiceDueInDays} onChange={e => setNewInvoiceDueInDays(parseInt(e.target.value, 10) || 15)} data-testid="invoice-due-days" />
                 </div>
                 <div className="space-y-2">
                   <Label>Line items</Label>
