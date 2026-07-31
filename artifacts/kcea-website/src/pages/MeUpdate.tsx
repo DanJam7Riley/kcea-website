@@ -127,8 +127,7 @@ export default function MeUpdate() {
       <header className="sticky top-0 z-50 w-full border-b border-border/40 bg-background/80 backdrop-blur supports-[backdrop-filter]:bg-background/60">
         <div className="container mx-auto px-4 h-16 flex items-center justify-between">
           <Link href="/" className="flex items-center gap-2 text-primary font-bold text-xl tracking-tight">
-            <Shield className="h-6 w-6" />
-            KCEA
+            <img src={`${BASE}/kcea-logo.png`} alt="KCEA" className="h-8 w-auto" />
           </Link>
           <Link href="/" className="text-sm text-muted-foreground hover:text-primary flex items-center gap-1.5">
             <ArrowLeft className="h-4 w-4" /> Back to {SITE_NAME}

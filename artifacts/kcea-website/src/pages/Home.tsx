@@ -1,8 +1,8 @@
 import { useState } from "react";
 import { motion } from "framer-motion";
 import { useQuery } from "@tanstack/react-query";
-import { 
-  ChevronDown, Check, AlertCircle, Mail, MapPin, Phone, 
+import {
+  ChevronDown, Check, AlertCircle, Mail, MapPin, Phone,
   TrendingUp, Shield, Users, Menu, X, Search, Loader2, Heart, Landmark
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -45,26 +45,26 @@ const DEFAULT_STATS: SiteStats = {
 };
 
 const DEFAULT_CAPTAINS: StreetCaptain[] = [
-  { id: 1,  street: "Derby",        captain: "Carina",          forms: 30, status: "Strong"      },
-  { id: 2,  street: "Orion",        captain: "Ingrid",          forms: 19, status: "Strong"      },
-  { id: 3,  street: "Protea",       captain: "Priscilla",       forms: 17, status: "Good"        },
-  { id: 4,  street: "Osprey",       captain: "Jo-Anne",         forms: 15, status: "Solid"       },
-  { id: 5,  street: "Onyx",         captain: "Maria D'Alves",   forms: 13, status: "Good"        },
-  { id: 6,  street: "Westmoreland", captain: "Unassigned",      forms: 13, status: "Steady"      },
-  { id: 7,  street: "Ocean",        captain: "Geoff",           forms: 12, status: "In Progress" },
-  { id: 8,  street: "Nymphe",       captain: "Maria D'Alves",   forms: 11, status: "In Progress" },
-  { id: 9,  street: "Highlands",    captain: "Unassigned",      forms: 11, status: "In Progress" },
-  { id: 10, street: "Orwell",       captain: "Unassigned",      forms: 9,  status: "Good"        },
-  { id: 11, street: "Nottingham",   captain: "Kerstin",         forms: 8,  status: "In Progress" },
-  { id: 12, street: "Leicester",    captain: "Unassigned",      forms: 8,  status: "In Progress" },
-  { id: 13, street: "Panther",      captain: "Paul Arokiam",    forms: 8,  status: "In Progress" },
-  { id: 14, street: "Nile",         captain: "Unassigned",      forms: 7,  status: "In Progress" },
-  { id: 15, street: "Phoenix",      captain: "Unassigned",      forms: 7,  status: "In Progress" },
-  { id: 16, street: "Ernest",       captain: "Unassigned",      forms: 1,  status: "Critical"    },
-  { id: 17, street: "Milner",       captain: "Unassigned",      forms: 1,  status: "Critical"    },
-  { id: 18, street: "Patrol",       captain: "Unassigned",      forms: 1,  status: "Critical"    },
-  { id: 19, street: "Mildura",      captain: "Garren / Feroze", forms: 0,  status: "Critical"    },
-  { id: 20, street: "Earls Court",  captain: "Unassigned",      forms: 0,  status: "Critical"    },
+  { id: 1, street: "Derby", captain: "Carina", forms: 30, status: "Strong" },
+  { id: 2, street: "Orion", captain: "Ingrid", forms: 19, status: "Strong" },
+  { id: 3, street: "Protea", captain: "Priscilla", forms: 17, status: "Good" },
+  { id: 4, street: "Osprey", captain: "Jo-Anne", forms: 15, status: "Solid" },
+  { id: 5, street: "Onyx", captain: "Maria D'Alves", forms: 13, status: "Good" },
+  { id: 6, street: "Westmoreland", captain: "Unassigned", forms: 13, status: "Steady" },
+  { id: 7, street: "Ocean", captain: "Geoff", forms: 12, status: "In Progress" },
+  { id: 8, street: "Nymphe", captain: "Maria D'Alves", forms: 11, status: "In Progress" },
+  { id: 9, street: "Highlands", captain: "Unassigned", forms: 11, status: "In Progress" },
+  { id: 10, street: "Orwell", captain: "Unassigned", forms: 9, status: "Good" },
+  { id: 11, street: "Nottingham", captain: "Kerstin", forms: 8, status: "In Progress" },
+  { id: 12, street: "Leicester", captain: "Unassigned", forms: 8, status: "In Progress" },
+  { id: 13, street: "Panther", captain: "Paul Arokiam", forms: 8, status: "In Progress" },
+  { id: 14, street: "Nile", captain: "Unassigned", forms: 7, status: "In Progress" },
+  { id: 15, street: "Phoenix", captain: "Unassigned", forms: 7, status: "In Progress" },
+  { id: 16, street: "Ernest", captain: "Unassigned", forms: 1, status: "Critical" },
+  { id: 17, street: "Milner", captain: "Unassigned", forms: 1, status: "Critical" },
+  { id: 18, street: "Patrol", captain: "Unassigned", forms: 1, status: "Critical" },
+  { id: 19, street: "Mildura", captain: "Garren / Feroze", forms: 0, status: "Critical" },
+  { id: 20, street: "Earls Court", captain: "Unassigned", forms: 0, status: "Critical" },
 ];
 
 // STREET_OPTIONS is the canonical KCEA street list, imported from
@@ -251,7 +251,6 @@ export default function Home() {
     });
   };
 
-
   const scrollTo = (id: string) => {
     const el = document.getElementById(id);
     if (el) {
@@ -270,10 +269,9 @@ export default function Home() {
       <header className="sticky top-0 z-50 w-full border-b border-border/40 bg-background/80 backdrop-blur supports-[backdrop-filter]:bg-background/60">
         <div className="container mx-auto px-4 h-16 flex items-center justify-between">
           <div className="flex items-center gap-2 text-primary font-bold text-xl tracking-tight" data-testid="logo-brand">
-            <Shield className="h-6 w-6" />
-            KCEA
+            <img src={`${BASE}/kcea-logo.png`} alt="KCEA" className="h-12 w-auto" />
           </div>
-          
+
           <nav className="hidden md:flex items-center gap-6 text-sm font-medium text-muted-foreground">
             <button onClick={() => scrollTo('project')} data-testid="link-nav-project" className="hover:text-primary transition-colors">Project</button>
             <button onClick={() => scrollTo('progress')} data-testid="link-nav-progress" className="hover:text-primary transition-colors">Progress</button>
@@ -303,10 +301,10 @@ export default function Home() {
       </header>
 
       <main className="container mx-auto px-4 py-12 space-y-24">
-        
+
         {/* Hero Section */}
         <section id="project" className="grid lg:grid-cols-2 gap-12 items-center min-h-[60vh] pt-8">
-          <motion.div 
+          <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.5 }}
@@ -316,7 +314,7 @@ export default function Home() {
               <Badge variant="outline" className="bg-accent/10 text-accent border-accent/20">Action Required</Badge>
               <span className="text-sm text-muted-foreground">Kensington Central Enclosure</span>
             </div>
-            <h1 className="text-4xl md:text-6xl font-bold leading-tight tracking-tighter">
+            <h1 className="font-display uppercase text-4xl md:text-6xl leading-tight tracking-tight">
               Securing our <span className="text-primary">streets</span>,<br />protecting our <span className="text-primary">families</span>.
             </h1>
             <p className="text-lg text-muted-foreground max-w-lg">
@@ -345,7 +343,7 @@ export default function Home() {
             </div>
           </motion.div>
 
-          <motion.div 
+          <motion.div
             initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
             transition={{ duration: 0.5, delay: 0.2 }}
@@ -377,7 +375,7 @@ export default function Home() {
         {/* Progress Section */}
         <section id="progress" className="space-y-12">
           <div className="text-center space-y-4 max-w-2xl mx-auto">
-            <h2 className="text-3xl md:text-4xl font-bold">Project Progress</h2>
+            <h2 className="font-display uppercase text-3xl md:text-4xl tracking-tight">Project Progress</h2>
             <p className="text-muted-foreground">There are {totalTargetHouseholds} households in the area. We need a majority of them committed to fully fund Phase 1 and the infrastructure. Every commitment brings us closer.</p>
           </div>
 
@@ -436,7 +434,7 @@ export default function Home() {
               >
                 <Progress value={stats.fundingPercent} className="h-3 bg-background" data-testid="progress-funding" />
               </motion.div>
-              
+
               <div className="grid md:grid-cols-3 gap-8 pt-8">
                 <div className="space-y-2">
                   <Badge variant="outline" className="bg-primary/20 text-primary border-primary/20">Current</Badge>
@@ -461,7 +459,7 @@ export default function Home() {
         {/* Commitment Section */}
         <section id="commit" className="space-y-12">
           <div className="text-center space-y-4 max-w-2xl mx-auto">
-            <h2 className="text-3xl md:text-4xl font-bold">Make Your Commitment</h2>
+            <h2 className="font-display uppercase text-3xl md:text-4xl tracking-tight">Make Your Commitment</h2>
             <p className="text-muted-foreground">Join {totalCommittedHouseholds} of your neighbours. We offer both monthly and once-off contribution options.</p>
           </div>
 
@@ -629,7 +627,7 @@ export default function Home() {
                         );
                       })()}
                     </div>
-                    
+
                     <div className="space-y-2">
                       <Label>Commitment Type</Label>
                       <Select required value={formData.commitmentType} onValueChange={v => setFormData(p => ({ ...p, commitmentType: v }))}>
@@ -663,16 +661,41 @@ export default function Home() {
             </Card>
 
             <div className="lg:col-span-2 space-y-6">
-              <Card className="bg-card border-card-border">
-                <CardContent className="p-8 space-y-6">
+              <Card className="bg-card border-card-border" data-testid="card-banking-details">
+                <CardContent className="p-6 sm:p-8 space-y-6">
                   <div className="flex items-center gap-3">
-                    <AlertCircle className="h-6 w-6 text-accent" />
-                    <h3 className="text-xl font-bold">Payment Details</h3>
+                    <div className="bg-primary/20 rounded-full p-3">
+                      <Landmark className="h-6 w-6 text-primary" />
+                    </div>
+                    <h3 className="text-xl font-bold">KCEA Banking Details</h3>
                   </div>
-                  <div className="bg-background/50 p-4 rounded-lg border border-border text-sm text-muted-foreground leading-relaxed">
-                    Bank details will be shared directly by your street captain once your commitment form is submitted.
+
+                  <dl className="divide-y divide-border rounded-lg border border-border bg-background/50 overflow-hidden">
+                    {[
+                      { label: "Bank", value: "FNB (First National Bank)" },
+                      { label: "Account Name", value: "Kensington Central Enclosure Association" },
+                      { label: "Account Number", value: "63213323693" },
+                      { label: "Branch Code", value: "250655" },
+                      { label: "Reference", value: "Your house number + street name (e.g. 14 Nile or 7 Osprey)" },
+                    ].map(row => (
+                      <div key={row.label} className="grid grid-cols-1 sm:grid-cols-3 gap-1 sm:gap-4 px-4 py-3">
+                        <dt className="text-sm font-medium text-muted-foreground">{row.label}</dt>
+                        <dd className="sm:col-span-2 text-sm font-semibold text-foreground break-words" data-testid={`banking-${row.label.toLowerCase().replace(/\s+/g, "-")}`}>
+                          {row.value}
+                        </dd>
+                      </div>
+                    ))}
+                  </dl>
+
+                  <div className="flex items-start gap-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3" data-testid="banking-security-notice">
+                    <AlertCircle className="h-5 w-5 text-amber-400 shrink-0 mt-0.5" />
+                    <p className="text-sm text-amber-200/90 leading-relaxed">
+                      <span aria-hidden="true">⚠️ </span>
+                      Banking details will only ever be shared by your official Street Captain. If you receive payment requests from unknown numbers, do not pay. When in doubt, contact your Street Captain.
+                    </p>
                   </div>
-                  <div className="pt-4 space-y-4">
+
+                  <div className="pt-2 space-y-3">
                     <p className="text-sm text-muted-foreground">After making your payment, please email your proof of payment to us.</p>
                     <Button asChild variant="outline" data-testid="link-email-pop" className="w-full border-card-border hover:bg-background">
                       <a href="mailto:Jomartins111@gmail.com?subject=Proof%20of%20Payment">
@@ -740,10 +763,10 @@ export default function Home() {
                       !lookupResult.found
                         ? "bg-red-500/10 border-red-500/30 text-red-300"
                         : lookupResult.incomplete
-                          ? "bg-amber-500/10 border-amber-500/30 text-amber-300"
-                          : lookupResult.paymentConfirmed
-                            ? "bg-green-500/10 border-green-500/30 text-green-300"
-                            : "bg-amber-500/10 border-amber-500/30 text-amber-300"
+                        ? "bg-amber-500/10 border-amber-500/30 text-amber-300"
+                        : lookupResult.paymentConfirmed
+                        ? "bg-green-500/10 border-green-500/30 text-green-300"
+                        : "bg-amber-500/10 border-amber-500/30 text-amber-300"
                     }`}>
                       <span className="text-base leading-none mt-0.5">
                         {!lookupResult.found ? "✗" : lookupResult.incomplete ? "⚠" : lookupResult.paymentConfirmed ? "✓" : "⚠"}
@@ -753,19 +776,19 @@ export default function Home() {
                           {!lookupResult.found
                             ? "We don't have a record for you."
                             : lookupResult.incomplete
-                              ? "We have a partial record for your address, but some details are missing."
-                              : lookupResult.paymentConfirmed
-                                ? "You're on the list — thank you for your commitment!"
-                                : "We have your name but no payment recorded yet."}
+                            ? "We have a partial record for your address, but some details are missing."
+                            : lookupResult.paymentConfirmed
+                            ? "You're on the list — thank you for your commitment!"
+                            : "We have your name but no payment recorded yet."}
                         </p>
                         <p className="text-xs opacity-80">
                           {!lookupResult.found
                             ? "Please submit the commitment form above or contact your street captain."
                             : lookupResult.incomplete
-                              ? "Please contact your street captain or email jomartins111@gmail.com to complete your registration."
-                              : lookupResult.paymentConfirmed
-                                ? `Found: ${lookupResult.names?.join("; ")}`
-                                : "Your street captain will be in touch to confirm payment."}
+                            ? "Please contact your street captain or email jomartins111@gmail.com to complete your registration."
+                            : lookupResult.paymentConfirmed
+                            ? `Found: ${lookupResult.names?.join("; ")}`
+                            : "Your street captain will be in touch to confirm payment."}
                         </p>
                       </div>
                     </div>
@@ -779,7 +802,7 @@ export default function Home() {
         {/* Street Captains Section */}
         <section id="captains" className="space-y-12">
           <div className="text-center space-y-4 max-w-2xl mx-auto">
-            <h2 className="text-3xl md:text-4xl font-bold">Street Captains</h2>
+            <h2 className="font-display uppercase text-3xl md:text-4xl tracking-tight">Street Captains</h2>
             <p className="text-muted-foreground">Connect with your street captain to submit forms or ask questions. Want to volunteer? Let us know.</p>
           </div>
 
@@ -833,7 +856,7 @@ export default function Home() {
         <section id="volunteer" className="max-w-3xl mx-auto">
           <div className="text-center space-y-4 mb-10">
             <Badge className="bg-primary/20 text-primary border-primary/20" variant="outline">Get Involved</Badge>
-            <h2 className="text-3xl md:text-4xl font-bold">Become a Street Captain</h2>
+            <h2 className="font-display uppercase text-3xl md:text-4xl tracking-tight">Become a Street Captain</h2>
             <p className="text-muted-foreground leading-relaxed max-w-xl mx-auto">
               Street captains do door-to-door visits, answer neighbour questions, and report commitment numbers back to the committee. It takes about 2–3 hours per month.
             </p>
@@ -986,57 +1009,10 @@ export default function Home() {
           </Card>
         </section>
 
-        {/* How to Pay Section */}
-        <section id="how-to-pay" className="max-w-3xl mx-auto">
-          <div className="text-center space-y-4 mb-10">
-            <Badge className="bg-primary/20 text-primary border-primary/20" variant="outline">Banking Details</Badge>
-            <h2 className="text-3xl md:text-4xl font-bold">How to Pay</h2>
-            <p className="text-muted-foreground leading-relaxed max-w-xl mx-auto">
-              Use the banking details below to make your contribution via EFT.
-            </p>
-          </div>
-
-          <Card className="bg-card border-card-border">
-            <CardContent className="p-8 space-y-6">
-              <div className="flex items-center gap-3">
-                <div className="bg-primary/20 rounded-full p-3">
-                  <Landmark className="h-6 w-6 text-primary" />
-                </div>
-                <h3 className="text-xl font-bold">KCEA Banking Details</h3>
-              </div>
-
-              <dl className="divide-y divide-border rounded-lg border border-border bg-background/50 overflow-hidden">
-                {[
-                  { label: "Bank", value: "FNB (First National Bank)" },
-                  { label: "Account Name", value: "Kensington Central Enclosure Association" },
-                  { label: "Account Number", value: "63213323693" },
-                  { label: "Branch Code", value: "250655" },
-                  { label: "Reference", value: "Your house number + street name (e.g. 14 Nile or 7 Osprey)" },
-                ].map(row => (
-                  <div key={row.label} className="grid grid-cols-1 sm:grid-cols-3 gap-1 sm:gap-4 px-4 py-3">
-                    <dt className="text-sm font-medium text-muted-foreground">{row.label}</dt>
-                    <dd className="sm:col-span-2 text-sm font-semibold text-foreground break-words" data-testid={`banking-${row.label.toLowerCase().replace(/\s+/g, "-")}`}>
-                      {row.value}
-                    </dd>
-                  </div>
-                ))}
-              </dl>
-
-              <div className="flex items-start gap-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3" data-testid="banking-security-notice">
-                <AlertCircle className="h-5 w-5 text-amber-400 shrink-0 mt-0.5" />
-                <p className="text-sm text-amber-200/90 leading-relaxed">
-                  <span aria-hidden="true">⚠️ </span>
-                  Banking details will only ever be shared by your official Street Captain. If you receive payment requests from unknown numbers, do not pay. When in doubt, contact your Street Captain.
-                </p>
-              </div>
-            </CardContent>
-          </Card>
-        </section>
-
         {/* FAQ Section */}
         <section id="faq" className="space-y-12 max-w-4xl mx-auto">
           <div className="text-center space-y-4">
-            <h2 className="text-3xl md:text-4xl font-bold">Frequently Asked Questions</h2>
+            <h2 className="font-display uppercase text-3xl md:text-4xl tracking-tight">Frequently Asked Questions</h2>
             <p className="text-muted-foreground">Everything you need to know about the KCEA project.</p>
           </div>
 
@@ -1071,7 +1047,7 @@ export default function Home() {
               </div>
             )}
           </div>
-          
+
           <div className="space-y-6 lg:pl-12 lg:border-l border-border">
             <h3 className="text-2xl font-bold">Contact Us</h3>
             <div className="space-y-4">
