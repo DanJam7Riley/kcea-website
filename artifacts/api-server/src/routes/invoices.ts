@@ -68,6 +68,65 @@ router.get("/invoices", async (req, res) => {
   }
 });
 
+// Standard rate is R250/month per household. Earls Court is a complex billed at
+// R150/month — matches KCEA's own reconciled payment history, not the flat rate
+// the public-facing site advertises for standalone houses.
+function monthlyRateForStreet(street: string): number {
+  return street === "Earls Court" ? 150 : 250;
+}
+
+function startOfCurrentMonth(): Date {
+  const now = new Date();
+  return new Date(now.getFullYear(), now.getMonth(), 1);
+}
+
+// Preview — admin only. Returns every "monthly" commitment that doesn't already
+// have an invoice dated this calendar month, with the rate that would be charged.
+// Nothing is written here; the admin reviews/deselects in the UI, then confirms
+// via bulk-generate. Once-off (R3,000) commitments are excluded by definition —
+// this only ever looks at commitmentType === "monthly".
+//
+// IMPORTANT: this route must stay registered ABOVE GET /invoices/:id. Express
+// matches routes in registration order, so if /invoices/:id comes first it
+// swallows this request (treats "bulk-preview" as the :id param, parseInt fails,
+// returns 400 "Invalid id"). Fixed 2026-07-31 — see KCEA_MASTER.md.
+router.get("/invoices/bulk-preview", async (req, res) => {
+  if (!isAdminReq(req.headers)) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+  try {
+    const monthStart = startOfCurrentMonth();
+
+    const monthly = await db
+      .select()
+      .from(commitmentsTable)
+      .where(eq(commitmentsTable.commitmentType, "monthly"));
+
+    const alreadyInvoiced = await db
+      .select({ commitmentId: invoicesTable.commitmentId })
+      .from(invoicesTable)
+      .where(sql`${invoicesTable.commitmentId} is not null and ${invoicesTable.invoiceDate} >= ${monthStart}`);
+    const invoicedIds = new Set(alreadyInvoiced.map(r => r.commitmentId));
+
+    const eligible = monthly
+      .filter(c => !invoicedIds.has(c.id))
+      .map(c => ({
+        commitmentId: c.id,
+        fullName: c.fullName,
+        street: c.street,
+        houseNumber: c.houseNumber,
+        email: c.email,
+        rate: monthlyRateForStreet(c.street),
+      }));
+
+    res.json({ eligible, alreadyInvoicedThisMonth: monthly.length - eligible.length });
+  } catch (err) {
+    req.log.error(err);
+    res.status(500).json({ error: "Failed to build bulk invoice preview" });
+  }
+});
+
 // Single invoice + its line items — admin only.
 router.get("/invoices/:id", async (req, res) => {
   if (!isAdminReq(req.headers)) {
@@ -177,60 +236,6 @@ router.post("/invoices", async (req, res) => {
   } catch (err) {
     req.log.error(err);
     res.status(500).json({ error: "Failed to create invoice" });
-  }
-});
-
-// Standard rate is R250/month per household. Earls Court is a complex billed at
-// R150/month — matches KCEA's own reconciled payment history, not the flat rate
-// the public-facing site advertises for standalone houses.
-function monthlyRateForStreet(street: string): number {
-  return street === "Earls Court" ? 150 : 250;
-}
-
-function startOfCurrentMonth(): Date {
-  const now = new Date();
-  return new Date(now.getFullYear(), now.getMonth(), 1);
-}
-
-// Preview — admin only. Returns every "monthly" commitment that doesn't already
-// have an invoice dated this calendar month, with the rate that would be charged.
-// Nothing is written here; the admin reviews/deselects in the UI, then confirms
-// via bulk-generate. Once-off (R3,000) commitments are excluded by definition —
-// this only ever looks at commitmentType === "monthly".
-router.get("/invoices/bulk-preview", async (req, res) => {
-  if (!isAdminReq(req.headers)) {
-    res.status(401).json({ error: "Unauthorized" });
-    return;
-  }
-  try {
-    const monthStart = startOfCurrentMonth();
-
-    const monthly = await db
-      .select()
-      .from(commitmentsTable)
-      .where(eq(commitmentsTable.commitmentType, "monthly"));
-
-    const alreadyInvoiced = await db
-      .select({ commitmentId: invoicesTable.commitmentId })
-      .from(invoicesTable)
-      .where(sql`${invoicesTable.commitmentId} is not null and ${invoicesTable.invoiceDate} >= ${monthStart}`);
-    const invoicedIds = new Set(alreadyInvoiced.map(r => r.commitmentId));
-
-    const eligible = monthly
-      .filter(c => !invoicedIds.has(c.id))
-      .map(c => ({
-        commitmentId: c.id,
-        fullName: c.fullName,
-        street: c.street,
-        houseNumber: c.houseNumber,
-        email: c.email,
-        rate: monthlyRateForStreet(c.street),
-      }));
-
-    res.json({ eligible, alreadyInvoicedThisMonth: monthly.length - eligible.length });
-  } catch (err) {
-    req.log.error(err);
-    res.status(500).json({ error: "Failed to build bulk invoice preview" });
   }
 });
 
