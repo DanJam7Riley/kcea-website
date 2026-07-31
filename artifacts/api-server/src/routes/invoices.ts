@@ -128,8 +128,8 @@ router.post("/invoices", async (req, res) => {
   const billToHouseNumber = typeof body.billToHouseNumber === "string" ? body.billToHouseNumber.trim() || null : null;
   const billToEmail = typeof body.billToEmail === "string" ? body.billToEmail.trim() || null : null;
   const notes = typeof body.notes === "string" ? body.notes.trim() || null : null;
-  // Default payment terms: 7 days, per KCEA's own instruction.
-  const dueInDays = typeof body.dueInDays === "number" && body.dueInDays > 0 ? body.dueInDays : 7;
+  // Default payment terms: 15 days, per Ingrid (treasurer) — 7 was too tight for residents paid mid-month.
+  const dueInDays = typeof body.dueInDays === "number" && body.dueInDays > 0 ? body.dueInDays : 15;
 
   try {
     if (commitmentId !== null) {
@@ -180,6 +180,148 @@ router.post("/invoices", async (req, res) => {
   }
 });
 
+// Standard rate is R250/month per household. Earls Court is a complex billed at
+// R150/month — matches KCEA's own reconciled payment history, not the flat rate
+// the public-facing site advertises for standalone houses.
+function monthlyRateForStreet(street: string): number {
+  return street === "Earls Court" ? 150 : 250;
+}
+
+function startOfCurrentMonth(): Date {
+  const now = new Date();
+  return new Date(now.getFullYear(), now.getMonth(), 1);
+}
+
+// Preview — admin only. Returns every "monthly" commitment that doesn't already
+// have an invoice dated this calendar month, with the rate that would be charged.
+// Nothing is written here; the admin reviews/deselects in the UI, then confirms
+// via bulk-generate. Once-off (R3,000) commitments are excluded by definition —
+// this only ever looks at commitmentType === "monthly".
+router.get("/invoices/bulk-preview", async (req, res) => {
+  if (!isAdminReq(req.headers)) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+  try {
+    const monthStart = startOfCurrentMonth();
+
+    const monthly = await db
+      .select()
+      .from(commitmentsTable)
+      .where(eq(commitmentsTable.commitmentType, "monthly"));
+
+    const alreadyInvoiced = await db
+      .select({ commitmentId: invoicesTable.commitmentId })
+      .from(invoicesTable)
+      .where(sql`${invoicesTable.commitmentId} is not null and ${invoicesTable.invoiceDate} >= ${monthStart}`);
+    const invoicedIds = new Set(alreadyInvoiced.map(r => r.commitmentId));
+
+    const eligible = monthly
+      .filter(c => !invoicedIds.has(c.id))
+      .map(c => ({
+        commitmentId: c.id,
+        fullName: c.fullName,
+        street: c.street,
+        houseNumber: c.houseNumber,
+        email: c.email,
+        rate: monthlyRateForStreet(c.street),
+      }));
+
+    res.json({ eligible, alreadyInvoicedThisMonth: monthly.length - eligible.length });
+  } catch (err) {
+    req.log.error(err);
+    res.status(500).json({ error: "Failed to build bulk invoice preview" });
+  }
+});
+
+// Generate — admin only. Body: { commitmentIds: number[] } — exactly the set the
+// admin kept after reviewing the preview (anyone they unchecked, e.g. a once-off
+// payer that slipped through, is simply left out). Re-checks eligibility per ID
+// so nothing gets double-invoiced even if the preview is stale.
+router.post("/invoices/bulk-generate", async (req, res) => {
+  if (!isAdminReq(req.headers)) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+  const body = req.body as Record<string, unknown>;
+  const commitmentIds = Array.isArray(body.commitmentIds)
+    ? (body.commitmentIds as unknown[]).filter((n): n is number => typeof n === "number" && Number.isInteger(n))
+    : [];
+  if (commitmentIds.length === 0) {
+    res.status(400).json({ error: "commitmentIds must be a non-empty array" });
+    return;
+  }
+
+  const created: string[] = [];
+  const skipped: { commitmentId: number; reason: string }[] = [];
+  const monthStart = startOfCurrentMonth();
+  const createdBy = createdByFromReq(req.headers as Record<string, unknown>);
+
+  try {
+    for (const commitmentId of commitmentIds) {
+      const [commitment] = await db.select().from(commitmentsTable).where(eq(commitmentsTable.id, commitmentId));
+      if (!commitment) {
+        skipped.push({ commitmentId, reason: "Commitment not found" });
+        continue;
+      }
+      if (commitment.commitmentType !== "monthly") {
+        skipped.push({ commitmentId, reason: "Not a monthly commitment (likely once-off)" });
+        continue;
+      }
+      const [existing] = await db
+        .select({ id: invoicesTable.id })
+        .from(invoicesTable)
+        .where(
+          sql`${invoicesTable.commitmentId} = ${commitmentId} and ${invoicesTable.invoiceDate} >= ${monthStart}`,
+        );
+      if (existing) {
+        skipped.push({ commitmentId, reason: "Already invoiced this month" });
+        continue;
+      }
+
+      const rate = monthlyRateForStreet(commitment.street);
+      const invoiceDate = new Date();
+      // 15-day due date, per Ingrid (treasurer) — matches the default on the manual create form.
+      const dueDate = new Date(invoiceDate.getTime() + 15 * 24 * 60 * 60 * 1000);
+      const invoiceNumber = await nextInvoiceNumber();
+
+      const [invoice] = await db
+        .insert(invoicesTable)
+        .values({
+          invoiceNumber,
+          commitmentId,
+          billToName: commitment.fullName,
+          billToStreet: commitment.street,
+          billToHouseNumber: commitment.houseNumber,
+          billToEmail: commitment.email,
+          invoiceDate,
+          dueDate,
+          status: "unpaid",
+          subtotal: rate,
+          total: rate,
+          notes: null,
+          createdBy,
+        })
+        .returning();
+
+      await db.insert(invoiceLineItemsTable).values({
+        invoiceId: invoice.id,
+        description: "Monthly household contribution",
+        quantity: 1,
+        unitAmount: rate,
+        amount: rate,
+      });
+
+      created.push(invoiceNumber);
+    }
+
+    res.status(201).json({ created, skipped, createdCount: created.length, skippedCount: skipped.length });
+  } catch (err) {
+    req.log.error(err);
+    res.status(500).json({ error: "Failed to bulk-generate invoices" });
+  }
+});
+
 // Update status only — admin only. Body: { status: "draft"|"unpaid"|"paid"|"overdue"|"cancelled" }
 router.put("/invoices/:id/status", async (req, res) => {
   if (!isAdminReq(req.headers)) {
@@ -212,6 +354,33 @@ router.put("/invoices/:id/status", async (req, res) => {
   } catch (err) {
     req.log.error(err);
     res.status(500).json({ error: "Failed to update invoice status" });
+  }
+});
+
+// Delete — admin only. Hard delete (line items cascade via FK). For cleaning up
+// test invoices or bulk-generate mistakes (e.g. a once-off payer that slipped
+// through) — per KCEA's own instruction that removal should mean gone, not
+// just hidden as "cancelled".
+router.delete("/invoices/:id", async (req, res) => {
+  if (!isAdminReq(req.headers)) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+  const id = parseInt(req.params.id, 10);
+  if (isNaN(id)) {
+    res.status(400).json({ error: "Invalid id" });
+    return;
+  }
+  try {
+    const [deleted] = await db.delete(invoicesTable).where(eq(invoicesTable.id, id)).returning();
+    if (!deleted) {
+      res.status(404).json({ error: "Not found" });
+      return;
+    }
+    res.json({ ok: true });
+  } catch (err) {
+    req.log.error(err);
+    res.status(500).json({ error: "Failed to delete invoice" });
   }
 });
 
