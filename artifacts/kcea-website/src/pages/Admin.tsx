@@ -645,6 +645,12 @@ export default function Admin() {
   // emailSentAt), so it's safe to click again later for newly generated ones.
   const [showSendAllInvoices, setShowSendAllInvoices] = useState(false);
   const [sendAllResult, setSendAllResult] = useState<{ sent: number; skippedNoEmail: number; failed: number } | null>(null);
+  // Running totals shown WHILE the batches are still going — the server only
+  // ever processes a bounded batch per request (see SEND_ALL_BATCH_SIZE on the
+  // backend), so a large run (hundreds of invoices) takes several calls
+  // instead of one long one that could time out. This also means it's safe to
+  // leave this running; there's no single request that can hang indefinitely.
+  const [sendAllProgress, setSendAllProgress] = useState<{ sent: number; skippedNoEmail: number; failed: number } | null>(null);
 
   const { data: unsentData, isLoading: unsentLoading, isError: unsentIsError, error: unsentError, refetch: refetchUnsent } = useQuery<{ readyToSend: number; noEmailOnFile: number; preview: { id: number; invoiceNumber: string; billToName: string; billToEmail: string; total: number }[] }>({
     queryKey: ["invoices-unsent"],
@@ -659,19 +665,38 @@ export default function Admin() {
 
   function openSendAllDialog() {
     setSendAllResult(null);
+    setSendAllProgress(null);
     setShowSendAllInvoices(true);
   }
 
   const sendAllInvoices = useMutation({
-    mutationFn: () =>
-      fetch(`${BASE}/api/invoices/send-all`, {
-        method: "POST",
-        headers: { ...authHeaders, "Content-Type": "application/json" },
-        body: JSON.stringify({ confirm: true }),
-      }).then(async r => {
-        if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error ?? "Failed to send invoices");
-        return r.json() as Promise<{ sent: number; skippedNoEmail: number; failed: number }>;
-      }),
+    mutationFn: async () => {
+      let totals = { sent: 0, skippedNoEmail: 0, failed: 0 };
+      setSendAllProgress(totals);
+      // Loop calling the batched endpoint until it reports nothing left —
+      // each individual call stays small/fast so it can't hang like a single
+      // all-488-at-once request would.
+      // eslint-disable-next-line no-constant-condition
+      while (true) {
+        const res = await fetch(`${BASE}/api/invoices/send-all`, {
+          method: "POST",
+          headers: { ...authHeaders, "Content-Type": "application/json" },
+          body: JSON.stringify({ confirm: true }),
+        });
+        if (!res.ok) {
+          throw new Error((await res.json().catch(() => ({}))).error ?? "Failed to send invoices");
+        }
+        const data = (await res.json()) as { sent: number; skippedNoEmail: number; failed: number; remaining: number };
+        totals = {
+          sent: totals.sent + data.sent,
+          skippedNoEmail: totals.skippedNoEmail + data.skippedNoEmail,
+          failed: totals.failed + data.failed,
+        };
+        setSendAllProgress(totals);
+        if (!data.remaining) break;
+      }
+      return totals;
+    },
     onSuccess: (data) => {
       qc.invalidateQueries({ queryKey: ["invoices"] });
       setSendAllResult(data);
@@ -2852,6 +2877,16 @@ export default function Admin() {
                     <p className="text-sm font-semibold text-teal-300">Done</p>
                     <p className="text-xs text-teal-200/90">{sendAllResult.sent} sent{sendAllResult.skippedNoEmail ? `, ${sendAllResult.skippedNoEmail} skipped (no email on file)` : ""}{sendAllResult.failed ? `, ${sendAllResult.failed} failed` : ""}.</p>
                   </div>
+                ) : sendAllInvoices.isPending ? (
+                  <div className="rounded-lg border border-card-border p-4 space-y-1">
+                    <p className="text-sm font-semibold">Sending — this runs in small batches, keep this open...</p>
+                    <p className="text-xs text-muted-foreground">
+                      {sendAllProgress?.sent ?? 0} sent so far
+                      {sendAllProgress?.skippedNoEmail ? `, ${sendAllProgress.skippedNoEmail} skipped` : ""}
+                      {sendAllProgress?.failed ? `, ${sendAllProgress.failed} failed` : ""}
+                      {unsentData?.readyToSend ? ` of ${unsentData.readyToSend}` : ""}.
+                    </p>
+                  </div>
                 ) : unsentLoading ? (
                   <p className="text-sm text-muted-foreground py-6 text-center">Checking what's ready to send...</p>
                 ) : unsentIsError ? (
@@ -2885,6 +2920,12 @@ export default function Admin() {
                       </div>
                     )}
                   </>
+                )}
+                {sendAllInvoices.isError && (
+                  <p className="text-sm text-red-400">
+                    {(sendAllInvoices.error as Error).message}
+                    {sendAllProgress ? ` (${sendAllProgress.sent} did get sent before this — safe to try again for the rest.)` : ""}
+                  </p>
                 )}
               </div>
               <DialogFooter>
