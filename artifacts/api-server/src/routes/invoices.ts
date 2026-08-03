@@ -1,7 +1,8 @@
 import { Router } from "express";
 import { db, invoicesTable, invoiceLineItemsTable, commitmentsTable } from "@workspace/db";
-import { eq, desc, sql } from "drizzle-orm";
+import { eq, desc, sql, and, isNull } from "drizzle-orm";
 import { isAdminReq, adminRoleFromHeaders, PRIMARY_USERNAME, SECONDARY_USERNAME } from "../lib/admin-auth";
+import { sendEmail } from "../lib/email";
 
 const router = Router();
 
@@ -124,6 +125,114 @@ router.get("/invoices/bulk-preview", async (req, res) => {
   } catch (err) {
     req.log.error(err);
     res.status(500).json({ error: "Failed to build bulk invoice preview" });
+  }
+});
+
+// ── Bulk email: preview + send ──────────────────────────────────
+// Same reason these live here and not lower down: Express matches routes in
+// registration order, and /invoices/:id below would otherwise swallow these
+// (parseInt("unsent") / parseInt("send-all") fails → 400), same trap that bit
+// bulk-preview before. Both must stay above GET /invoices/:id.
+//
+// "Unsent" = status isn't cancelled and emailSentAt is still null. Safe to
+// call the send route more than once — it only ever emails each invoice once.
+const isUsableEmail = (e: string | null | undefined) => !!e && e.trim() !== "";
+
+router.get("/invoices/unsent", async (req, res) => {
+  if (!isAdminReq(req.headers)) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+  try {
+    const rows = await db
+      .select()
+      .from(invoicesTable)
+      .where(and(sql`${invoicesTable.status} != 'cancelled'`, isNull(invoicesTable.emailSentAt)));
+
+    const emailable = rows.filter(r => isUsableEmail(r.billToEmail));
+    const noEmailOnFile = rows.filter(r => !isUsableEmail(r.billToEmail));
+
+    res.json({
+      readyToSend: emailable.length,
+      noEmailOnFile: noEmailOnFile.length,
+      preview: emailable.slice(0, 10).map(r => ({
+        id: r.id,
+        invoiceNumber: r.invoiceNumber,
+        billToName: r.billToName,
+        billToEmail: r.billToEmail,
+        total: r.total,
+      })),
+    });
+  } catch (err) {
+    req.log.error(err);
+    res.status(500).json({ error: "Failed to load unsent invoices" });
+  }
+});
+
+// Requires { confirm: true } in the body as a deliberate extra step, same
+// pattern as the legacy-confirm send route — never fires by accident.
+router.post("/invoices/send-all", async (req, res) => {
+  if (!isAdminReq(req.headers)) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+  const body = req.body as Record<string, unknown>;
+  if (body.confirm !== true) {
+    res.status(400).json({ error: "Refusing to send — pass { \"confirm\": true } in the request body." });
+    return;
+  }
+
+  try {
+    const rows = await db
+      .select()
+      .from(invoicesTable)
+      .where(and(sql`${invoicesTable.status} != 'cancelled'`, isNull(invoicesTable.emailSentAt)));
+
+    let sent = 0;
+    let skippedNoEmail = 0;
+    let failed = 0;
+
+    for (const inv of rows) {
+      if (!isUsableEmail(inv.billToEmail)) {
+        skippedNoEmail++;
+        continue;
+      }
+      const lineItems = await db.select().from(invoiceLineItemsTable).where(eq(invoiceLineItemsTable.invoiceId, inv.id));
+      const itemsText = lineItems.map(li => `- ${li.description} x${li.quantity}: R${li.amount.toLocaleString("en-ZA")}`).join("\n");
+      const dueDateStr = new Date(inv.dueDate).toLocaleDateString("en-ZA", { day: "numeric", month: "long", year: "numeric" });
+      const reference = [inv.billToHouseNumber, inv.billToStreet].filter(Boolean).join(" ") || inv.billToName;
+
+      const subject = `KCEA invoice ${inv.invoiceNumber}`;
+      const text =
+        `Hi ${inv.billToName},\n\n` +
+        `Here's your KCEA invoice ${inv.invoiceNumber}.\n\n` +
+        `${itemsText}\n\n` +
+        `Total due: R${inv.total.toLocaleString("en-ZA")}\n` +
+        `Due date: ${dueDateStr}\n\n` +
+        `Banking details:\n` +
+        `Kensington Central Enclosure Association\n` +
+        `FNB Gold Business Account\n` +
+        `Account number: 63213323693\n` +
+        `Branch code: 250655\n` +
+        `Reference: ${reference}\n\n` +
+        `Questions? Contact your street captain, or message KCEA on WhatsApp before paying if anything looks off. ` +
+        `We'll never ask for passwords, card numbers, or bank details by email.\n\n` +
+        `— KCEA`;
+
+      const result = await sendEmail(inv.billToEmail as string, subject, text);
+      if (result.ok) {
+        await db.update(invoicesTable).set({ emailSentAt: new Date() }).where(eq(invoicesTable.id, inv.id));
+        sent++;
+      } else {
+        req.log.warn({ invoiceId: inv.id, reason: result.reason }, "Invoice email failed to send");
+        failed++;
+      }
+    }
+
+    res.json({ sent, skippedNoEmail, failed });
+  } catch (err) {
+    req.log.error(err);
+    res.status(500).json({ error: "Send batch failed" });
   }
 });
 
