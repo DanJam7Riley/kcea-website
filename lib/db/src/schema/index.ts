@@ -188,6 +188,7 @@ export const invoicesTable = pgTable("invoices", {
   total: integer("total").notNull().default(0),
   notes: text("notes"),
   createdBy: text("created_by"),
+  emailSentAt: timestamp("email_sent_at"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
