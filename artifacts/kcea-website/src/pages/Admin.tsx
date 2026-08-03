@@ -509,20 +509,34 @@ export default function Admin() {
   const [showBulkInvoice, setShowBulkInvoice] = useState(false);
   const [bulkSelected, setBulkSelected] = useState<Set<number>>(new Set());
   const [bulkResult, setBulkResult] = useState<{ createdCount: number; skippedCount: number } | null>(null);
+  // "current" | "last" — lets Ingrid/Janine catch up a month that never got
+  // invoiced, without touching the normal monthly flow's default behaviour.
+  const [bulkMonth, setBulkMonth] = useState<"current" | "last">("current");
+
+  function monthParamFor(which: "current" | "last"): string | undefined {
+    if (which === "current") return undefined;
+    const now = new Date();
+    const last = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    return `${last.getFullYear()}-${String(last.getMonth() + 1).padStart(2, "0")}`;
+  }
 
   const { data: bulkPreviewData, isLoading: bulkPreviewLoading, isError: bulkPreviewIsError, error: bulkPreviewError, refetch: refetchBulkPreview } = useQuery<{ eligible: BulkPreviewRow[]; alreadyInvoicedThisMonth: number }>({
-    queryKey: ["invoices-bulk-preview"],
-    queryFn: () =>
-      fetch(`${BASE}/api/invoices/bulk-preview`, { headers: authHeaders }).then(async r => {
+    queryKey: ["invoices-bulk-preview", bulkMonth],
+    queryFn: () => {
+      const month = monthParamFor(bulkMonth);
+      const url = month ? `${BASE}/api/invoices/bulk-preview?month=${month}` : `${BASE}/api/invoices/bulk-preview`;
+      return fetch(url, { headers: authHeaders }).then(async r => {
         if (!r.ok) throw new Error(`${r.status}: ${await r.text()}`);
         return r.json();
-      }),
+      });
+    },
     enabled: authed && showBulkInvoice,
     retry: false,
   });
 
   function openBulkInvoiceDialog() {
     setBulkResult(null);
+    setBulkMonth("current");
     setShowBulkInvoice(true);
   }
 
@@ -548,7 +562,7 @@ export default function Admin() {
       fetch(`${BASE}/api/invoices/bulk-generate`, {
         method: "POST",
         headers: { ...authHeaders, "Content-Type": "application/json" },
-        body: JSON.stringify({ commitmentIds: Array.from(bulkSelected) }),
+        body: JSON.stringify({ commitmentIds: Array.from(bulkSelected), month: monthParamFor(bulkMonth) }),
       }).then(async r => {
         if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error ?? "Failed to generate invoices");
         return r.json() as Promise<{ created: string[]; skipped: { commitmentId: number; reason: string }[]; createdCount: number; skippedCount: number }>;
@@ -557,6 +571,71 @@ export default function Admin() {
       qc.invalidateQueries({ queryKey: ["invoices"] });
       setBulkResult({ createdCount: data.createdCount, skippedCount: data.skippedCount });
       refetchBulkPreview();
+    },
+  });
+
+  // ── Once-off (R3,000) signups: one invoice each, ever ───────────────────
+  // Same preview-then-confirm shape as the monthly flow, but no month concept
+  // — a commitment either has an invoice on record already or it doesn't.
+  interface OnceoffPreviewRow {
+    commitmentId: number;
+    fullName: string;
+    street: string;
+    houseNumber: string;
+    email: string;
+    amount: number;
+    willBeMarkedPaid: boolean;
+  }
+  const [showOnceoffInvoice, setShowOnceoffInvoice] = useState(false);
+  const [onceoffSelected, setOnceoffSelected] = useState<Set<number>>(new Set());
+  const [onceoffResult, setOnceoffResult] = useState<{ createdCount: number; skippedCount: number } | null>(null);
+
+  const { data: onceoffPreviewData, isLoading: onceoffPreviewLoading, isError: onceoffPreviewIsError, error: onceoffPreviewError, refetch: refetchOnceoffPreview } = useQuery<{ eligible: OnceoffPreviewRow[]; alreadyInvoiced: number }>({
+    queryKey: ["invoices-onceoff-preview"],
+    queryFn: () =>
+      fetch(`${BASE}/api/invoices/onceoff-preview`, { headers: authHeaders }).then(async r => {
+        if (!r.ok) throw new Error(`${r.status}: ${await r.text()}`);
+        return r.json();
+      }),
+    enabled: authed && showOnceoffInvoice,
+    retry: false,
+  });
+
+  function openOnceoffInvoiceDialog() {
+    setOnceoffResult(null);
+    setShowOnceoffInvoice(true);
+  }
+
+  useEffect(() => {
+    if (onceoffPreviewData?.eligible) {
+      setOnceoffSelected(new Set(onceoffPreviewData.eligible.map(r => r.commitmentId)));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [onceoffPreviewData]);
+
+  function toggleOnceoffSelected(id: number) {
+    setOnceoffSelected(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  const onceoffGenerate = useMutation({
+    mutationFn: () =>
+      fetch(`${BASE}/api/invoices/onceoff-generate`, {
+        method: "POST",
+        headers: { ...authHeaders, "Content-Type": "application/json" },
+        body: JSON.stringify({ commitmentIds: Array.from(onceoffSelected) }),
+      }).then(async r => {
+        if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error ?? "Failed to generate once-off invoices");
+        return r.json() as Promise<{ created: string[]; skipped: { commitmentId: number; reason: string }[]; createdCount: number; skippedCount: number }>;
+      }),
+    onSuccess: (data) => {
+      qc.invalidateQueries({ queryKey: ["invoices"] });
+      setOnceoffResult({ createdCount: data.createdCount, skippedCount: data.skippedCount });
+      refetchOnceoffPreview();
     },
   });
 
@@ -2526,6 +2605,9 @@ export default function Admin() {
                 <Button size="sm" variant="outline" className="gap-1.5" onClick={openBulkInvoiceDialog} data-testid="bulk-invoice-button">
                   <FileText className="h-4 w-4" /> Generate monthly invoices
                 </Button>
+                <Button size="sm" variant="outline" className="gap-1.5" onClick={openOnceoffInvoiceDialog} data-testid="onceoff-invoice-button">
+                  <FileText className="h-4 w-4" /> Invoice once-off signups
+                </Button>
                 <Button size="sm" variant="outline" className="gap-1.5" onClick={openSendAllDialog} data-testid="send-all-invoices-button">
                   <Mail className="h-4 w-4" /> Email all
                 </Button>
@@ -2653,9 +2735,28 @@ export default function Admin() {
               <div className="space-y-3">
                 <p className="text-sm text-muted-foreground">
                   Every household committed to the monthly R250 (R150 for Earls Court) that hasn't already
-                  been invoiced this calendar month. Uncheck anyone who shouldn't get one this round
-                  (e.g. already paid their R3,000 once-off).
+                  been invoiced for the selected month. Uncheck anyone who shouldn't get one this round.
                 </p>
+                <div className="flex items-center gap-3 text-sm">
+                  <label className="flex items-center gap-1.5 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="bulk-month"
+                      checked={bulkMonth === "current"}
+                      onChange={() => setBulkMonth("current")}
+                    />
+                    This month
+                  </label>
+                  <label className="flex items-center gap-1.5 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="bulk-month"
+                      checked={bulkMonth === "last"}
+                      onChange={() => setBulkMonth("last")}
+                    />
+                    Last month (catch-up)
+                  </label>
+                </div>
                 {bulkPreviewLoading ? (
                   <p className="text-sm text-muted-foreground py-6 text-center">Loading eligible households...</p>
                 ) : bulkPreviewIsError ? (
@@ -2797,6 +2898,99 @@ export default function Admin() {
                     {sendAllInvoices.isPending ? "Sending..." : `Email ${unsentData?.readyToSend || ""} invoice${unsentData?.readyToSend === 1 ? "" : "s"}`}
                   </Button>
                 )}
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+        )}
+
+        {showOnceoffInvoice && (
+          <Dialog open={showOnceoffInvoice} onOpenChange={setShowOnceoffInvoice}>
+            <DialogContent className="max-w-2xl">
+              <DialogHeader>
+                <DialogTitle>Invoice once-off signups</DialogTitle>
+              </DialogHeader>
+              <div className="space-y-3">
+                <p className="text-sm text-muted-foreground">
+                  Households that paid a once-off R3,000 instead of joining the monthly plan. Each gets exactly
+                  one invoice, ever — marked paid automatically if we already have their payment confirmed, so
+                  their account balance matches everyone else's.
+                </p>
+                {onceoffPreviewLoading ? (
+                  <p className="text-sm text-muted-foreground py-6 text-center">Loading eligible households...</p>
+                ) : onceoffPreviewIsError ? (
+                  <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-4 space-y-2">
+                    <p className="text-sm font-semibold text-red-300">Couldn't load the preview</p>
+                    <p className="text-xs text-red-200/90 break-words">{(onceoffPreviewError as Error).message}</p>
+                    <Button size="sm" variant="outline" className="gap-1.5" onClick={() => refetchOnceoffPreview()}>
+                      <RefreshCw className="h-3.5 w-3.5" /> Retry
+                    </Button>
+                  </div>
+                ) : !onceoffPreviewData || onceoffPreviewData.eligible.length === 0 ? (
+                  <p className="text-sm text-muted-foreground py-6 text-center">
+                    Nothing to invoice — every once-off household already has an invoice on record.
+                  </p>
+                ) : (
+                  <>
+                    <div className="flex items-center justify-between text-xs text-muted-foreground">
+                      <span>{onceoffSelected.size} of {onceoffPreviewData.eligible.length} selected</span>
+                      <div className="flex gap-3">
+                        <button
+                          type="button"
+                          className="underline underline-offset-2 hover:text-foreground"
+                          onClick={() => setOnceoffSelected(new Set(onceoffPreviewData.eligible.map(r => r.commitmentId)))}
+                        >
+                          Select all
+                        </button>
+                        <button
+                          type="button"
+                          className="underline underline-offset-2 hover:text-foreground"
+                          onClick={() => setOnceoffSelected(new Set())}
+                        >
+                          Deselect all
+                        </button>
+                      </div>
+                    </div>
+                    <div className="max-h-80 overflow-y-auto space-y-1 border border-border rounded-lg p-2">
+                      {onceoffPreviewData.eligible.map(row => (
+                        <label
+                          key={row.commitmentId}
+                          className="flex items-center gap-3 px-2 py-1.5 rounded-md hover:bg-background/50 cursor-pointer text-sm"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={onceoffSelected.has(row.commitmentId)}
+                            onChange={() => toggleOnceoffSelected(row.commitmentId)}
+                          />
+                          <span className="flex-1">
+                            {row.fullName} — {row.street} {row.houseNumber}
+                          </span>
+                          <span className="text-muted-foreground">
+                            R{row.amount} {row.willBeMarkedPaid ? "· will mark paid" : "· unpaid"}
+                          </span>
+                        </label>
+                      ))}
+                    </div>
+                  </>
+                )}
+                {onceoffResult && (
+                  <p className="text-sm text-green-400">
+                    Created {onceoffResult.createdCount} invoice{onceoffResult.createdCount === 1 ? "" : "s"}
+                    {onceoffResult.skippedCount > 0 ? ` (${onceoffResult.skippedCount} skipped)` : ""}.
+                  </p>
+                )}
+                {onceoffGenerate.isError && (
+                  <p className="text-sm text-red-400">{(onceoffGenerate.error as Error).message}</p>
+                )}
+              </div>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setShowOnceoffInvoice(false)}>Close</Button>
+                <Button
+                  disabled={onceoffSelected.size === 0 || onceoffGenerate.isPending}
+                  onClick={() => onceoffGenerate.mutate()}
+                  data-testid="submit-onceoff-generate"
+                >
+                  {onceoffGenerate.isPending ? "Generating..." : `Generate ${onceoffSelected.size || ""} invoice${onceoffSelected.size === 1 ? "" : "s"}`}
+                </Button>
               </DialogFooter>
             </DialogContent>
           </Dialog>
