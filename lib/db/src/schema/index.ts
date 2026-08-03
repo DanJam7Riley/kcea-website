@@ -37,6 +37,18 @@ export const commitmentsTable = pgTable("commitments", {
   notes: text("notes"),
   imported: boolean("imported").notNull().default(false),
   paymentConfirmed: boolean("payment_confirmed").notNull().default(false),
+  // ── Legacy consent-form confirmation (added 2026-07-30) ──────────
+  // Rows created by the bulk "legacy consent form" CSV import (paper forms
+  // signed 2025, never captured on the live site) start with both of these
+  // NULL. `identityConfirmedAt` is set the moment the resident clicks the
+  // one-click confirm link in their email — that's the actual consent event
+  // for taking on the payment obligation, distinct from `imported` (which
+  // just means "came from a CSV, not the public form"). Organic online
+  // signups never touch these columns; they stay NULL forever for those
+  // rows and that's fine — the columns only mean something for the
+  // legacy-import batch.
+  identityConfirmedAt: timestamp("identity_confirmed_at"),
+  legacyConfirmEmailSentAt: timestamp("legacy_confirm_email_sent_at"),
   submittedAt: timestamp("submitted_at").notNull().defaultNow(),
 });
 
