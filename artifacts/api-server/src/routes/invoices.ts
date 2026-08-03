@@ -328,6 +328,18 @@ router.get("/invoices/unsent", async (req, res) => {
 
 // Requires { confirm: true } in the body as a deliberate extra step, same
 // pattern as the legacy-confirm send route — never fires by accident.
+//
+// Processes at most BATCH_SIZE invoices per call instead of every unsent
+// invoice in one go. A single request sending hundreds of emails sequentially
+// (each one an awaited call to Resend) can run long enough to hit the
+// platform's request timeout — the client sees a hung "Sending..." with no
+// result, and a second click risks a second in-flight run touching invoices
+// the first hasn't marked emailSentAt on yet. Batching keeps each request
+// short and bounded; the frontend calls this repeatedly (using `remaining`)
+// until it hits 0. Safe to call in any order, any number of times — each
+// invoice still only ever gets emailed once.
+const SEND_ALL_BATCH_SIZE = 40;
+
 router.post("/invoices/send-all", async (req, res) => {
   if (!isAdminReq(req.headers)) {
     res.status(401).json({ error: "Unauthorized" });
@@ -340,10 +352,13 @@ router.post("/invoices/send-all", async (req, res) => {
   }
 
   try {
-    const rows = await db
+    const allUnsent = await db
       .select()
       .from(invoicesTable)
       .where(and(sql`${invoicesTable.status} != 'cancelled'`, isNull(invoicesTable.emailSentAt)));
+
+    const rows = allUnsent.slice(0, SEND_ALL_BATCH_SIZE);
+    const remaining = Math.max(0, allUnsent.length - rows.length);
 
     let sent = 0;
     let skippedNoEmail = 0;
@@ -386,7 +401,7 @@ router.post("/invoices/send-all", async (req, res) => {
       }
     }
 
-    res.json({ sent, skippedNoEmail, failed });
+    res.json({ sent, skippedNoEmail, failed, remaining });
   } catch (err) {
     req.log.error(err);
     res.status(500).json({ error: "Send batch failed" });
