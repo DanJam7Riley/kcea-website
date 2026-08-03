@@ -644,7 +644,7 @@ export default function Admin() {
   // confirms, then send. Only ever emails an invoice once (server tracks
   // emailSentAt), so it's safe to click again later for newly generated ones.
   const [showSendAllInvoices, setShowSendAllInvoices] = useState(false);
-  const [sendAllResult, setSendAllResult] = useState<{ sent: number; skippedNoEmail: number; failed: number } | null>(null);
+  const [sendAllResult, setSendAllResult] = useState<{ sent: number; skippedNoEmail: number; failed: number; failureReasons?: string[] } | null>(null);
   // Running totals shown WHILE the batches are still going — the server only
   // ever processes a bounded batch per request (see SEND_ALL_BATCH_SIZE on the
   // backend), so a large run (hundreds of invoices) takes several calls
@@ -671,7 +671,7 @@ export default function Admin() {
 
   const sendAllInvoices = useMutation({
     mutationFn: async () => {
-      let totals = { sent: 0, skippedNoEmail: 0, failed: 0 };
+      let totals: { sent: number; skippedNoEmail: number; failed: number; failureReasons?: string[] } = { sent: 0, skippedNoEmail: 0, failed: 0 };
       setSendAllProgress(totals);
       // Loop calling the batched endpoint until it reports nothing left —
       // each individual call stays small/fast so it can't hang like a single
@@ -686,13 +686,23 @@ export default function Admin() {
         if (!res.ok) {
           throw new Error((await res.json().catch(() => ({}))).error ?? "Failed to send invoices");
         }
-        const data = (await res.json()) as { sent: number; skippedNoEmail: number; failed: number; remaining: number };
+        const data = (await res.json()) as { sent: number; skippedNoEmail: number; failed: number; remaining: number; failureReasons?: string[] };
         totals = {
           sent: totals.sent + data.sent,
           skippedNoEmail: totals.skippedNoEmail + data.skippedNoEmail,
           failed: totals.failed + data.failed,
+          failureReasons: data.failureReasons?.length ? data.failureReasons : totals.failureReasons,
         };
         setSendAllProgress(totals);
+        // If an entire batch sent nothing successfully, something systemic is
+        // wrong (rate limit, bad API key, etc) — stop instead of hammering
+        // the same failing batch forever (failed invoices stay unsent, so
+        // they'd just be retried every loop with no progress).
+        if (data.sent === 0 && data.failed > 0) {
+          throw new Error(
+            `Every invoice in this batch failed to send${data.failureReasons?.length ? ` (${data.failureReasons.join(", ")})` : ""} — stopped before retrying more.`,
+          );
+        }
         if (!data.remaining) break;
       }
       return totals;
@@ -2876,6 +2886,9 @@ export default function Admin() {
                   <div className="rounded-lg border border-teal-500/30 bg-teal-500/10 p-4 space-y-1">
                     <p className="text-sm font-semibold text-teal-300">Done</p>
                     <p className="text-xs text-teal-200/90">{sendAllResult.sent} sent{sendAllResult.skippedNoEmail ? `, ${sendAllResult.skippedNoEmail} skipped (no email on file)` : ""}{sendAllResult.failed ? `, ${sendAllResult.failed} failed` : ""}.</p>
+                    {!!sendAllResult.failureReasons?.length && (
+                      <p className="text-xs text-teal-200/70">Failure reason(s): {sendAllResult.failureReasons.join(", ")}</p>
+                    )}
                   </div>
                 ) : sendAllInvoices.isPending ? (
                   <div className="rounded-lg border border-card-border p-4 space-y-1">

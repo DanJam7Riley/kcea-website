@@ -363,11 +363,22 @@ router.post("/invoices/send-all", async (req, res) => {
     let sent = 0;
     let skippedNoEmail = 0;
     let failed = 0;
+    // First few distinct failure reasons, surfaced to the caller — without
+    // this, a systemic problem (e.g. hitting Resend's rate limit) just shows
+    // up as an opaque "40 failed" with no way to tell what actually broke.
+    const failureReasons: string[] = [];
 
     for (const inv of rows) {
       if (!isUsableEmail(inv.billToEmail)) {
         skippedNoEmail++;
         continue;
+      }
+      // Resend rate-limits by requests/second; firing 40 sends back-to-back
+      // in a tight loop can blow through that and fail the whole batch. A
+      // small gap between sends keeps us under it without slowing things
+      // down much (40 invoices ≈ 16s per batch).
+      if (sent + failed > 0) {
+        await new Promise(r => setTimeout(r, 400));
       }
       const lineItems = await db.select().from(invoiceLineItemsTable).where(eq(invoiceLineItemsTable.invoiceId, inv.id));
       const itemsText = lineItems.map(li => `- ${li.description} x${li.quantity}: R${li.amount.toLocaleString("en-ZA")}`).join("\n");
@@ -398,10 +409,13 @@ router.post("/invoices/send-all", async (req, res) => {
       } else {
         req.log.warn({ invoiceId: inv.id, reason: result.reason }, "Invoice email failed to send");
         failed++;
+        if (!failureReasons.includes(result.reason) && failureReasons.length < 3) {
+          failureReasons.push(result.reason);
+        }
       }
     }
 
-    res.json({ sent, skippedNoEmail, failed, remaining });
+    res.json({ sent, skippedNoEmail, failed, remaining, failureReasons });
   } catch (err) {
     req.log.error(err);
     res.status(500).json({ error: "Send batch failed" });
