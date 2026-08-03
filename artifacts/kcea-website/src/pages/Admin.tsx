@@ -54,6 +54,7 @@ interface InvoiceRow {
   total: number;
   notes: string | null;
   createdBy: string | null;
+  emailSentAt: string | null;
   createdAt: string;
   lineItems?: InvoiceLineItem[];
 }
@@ -556,6 +557,46 @@ export default function Admin() {
       qc.invalidateQueries({ queryKey: ["invoices"] });
       setBulkResult({ createdCount: data.createdCount, skippedCount: data.skippedCount });
       refetchBulkPreview();
+    },
+  });
+
+  // ── Bulk invoice email ─────────────────────────────────────────
+  // Same shape as bulk invoice generation above: preview first, admin
+  // confirms, then send. Only ever emails an invoice once (server tracks
+  // emailSentAt), so it's safe to click again later for newly generated ones.
+  const [showSendAllInvoices, setShowSendAllInvoices] = useState(false);
+  const [sendAllResult, setSendAllResult] = useState<{ sent: number; skippedNoEmail: number; failed: number } | null>(null);
+
+  const { data: unsentData, isLoading: unsentLoading, isError: unsentIsError, error: unsentError, refetch: refetchUnsent } = useQuery<{ readyToSend: number; noEmailOnFile: number; preview: { id: number; invoiceNumber: string; billToName: string; billToEmail: string; total: number }[] }>({
+    queryKey: ["invoices-unsent"],
+    queryFn: () =>
+      fetch(`${BASE}/api/invoices/unsent`, { headers: authHeaders }).then(async r => {
+        if (!r.ok) throw new Error(`${r.status}: ${await r.text()}`);
+        return r.json();
+      }),
+    enabled: authed && showSendAllInvoices,
+    retry: false,
+  });
+
+  function openSendAllDialog() {
+    setSendAllResult(null);
+    setShowSendAllInvoices(true);
+  }
+
+  const sendAllInvoices = useMutation({
+    mutationFn: () =>
+      fetch(`${BASE}/api/invoices/send-all`, {
+        method: "POST",
+        headers: { ...authHeaders, "Content-Type": "application/json" },
+        body: JSON.stringify({ confirm: true }),
+      }).then(async r => {
+        if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error ?? "Failed to send invoices");
+        return r.json() as Promise<{ sent: number; skippedNoEmail: number; failed: number }>;
+      }),
+    onSuccess: (data) => {
+      qc.invalidateQueries({ queryKey: ["invoices"] });
+      setSendAllResult(data);
+      refetchUnsent();
     },
   });
 
@@ -2485,6 +2526,9 @@ export default function Admin() {
                 <Button size="sm" variant="outline" className="gap-1.5" onClick={openBulkInvoiceDialog} data-testid="bulk-invoice-button">
                   <FileText className="h-4 w-4" /> Generate monthly invoices
                 </Button>
+                <Button size="sm" variant="outline" className="gap-1.5" onClick={openSendAllDialog} data-testid="send-all-invoices-button">
+                  <Mail className="h-4 w-4" /> Email all
+                </Button>
                 <Button size="sm" className="gap-1.5" onClick={() => setShowCreateInvoice(true)} data-testid="create-invoice-button">
                   <Plus className="h-4 w-4" /> New invoice
                 </Button>
@@ -2538,6 +2582,11 @@ export default function Admin() {
                             <Badge className={`${invoiceStatusBadgeClass(inv.status)} text-xs`} variant="outline">
                               {inv.status}
                             </Badge>
+                            {inv.emailSentAt && (
+                              <Badge className="bg-teal-500/20 text-teal-400 border-teal-500/20 text-xs gap-1" variant="outline">
+                                <Mail className="h-3 w-3" /> Emailed
+                              </Badge>
+                            )}
                           </div>
                           <div className="text-xs text-muted-foreground flex flex-wrap gap-x-4 gap-y-1">
                             <span>Invoiced {new Date(inv.invoiceDate).toLocaleDateString("en-ZA")}</span>
@@ -2681,6 +2730,73 @@ export default function Admin() {
                 >
                   {bulkGenerate.isPending ? "Generating..." : `Generate ${bulkSelected.size || ""} invoice${bulkSelected.size === 1 ? "" : "s"}`}
                 </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+        )}
+
+        {showSendAllInvoices && (
+          <Dialog open={showSendAllInvoices} onOpenChange={setShowSendAllInvoices}>
+            <DialogContent className="max-w-lg">
+              <DialogHeader>
+                <DialogTitle>Email all outstanding invoices</DialogTitle>
+              </DialogHeader>
+              <div className="space-y-3">
+                <p className="text-sm text-muted-foreground">
+                  Sends every invoice that hasn't been emailed yet to the address on file. Each invoice only
+                  ever gets emailed once, so it's safe to run this again later for newly generated invoices.
+                </p>
+                {sendAllResult ? (
+                  <div className="rounded-lg border border-teal-500/30 bg-teal-500/10 p-4 space-y-1">
+                    <p className="text-sm font-semibold text-teal-300">Done</p>
+                    <p className="text-xs text-teal-200/90">{sendAllResult.sent} sent{sendAllResult.skippedNoEmail ? `, ${sendAllResult.skippedNoEmail} skipped (no email on file)` : ""}{sendAllResult.failed ? `, ${sendAllResult.failed} failed` : ""}.</p>
+                  </div>
+                ) : unsentLoading ? (
+                  <p className="text-sm text-muted-foreground py-6 text-center">Checking what's ready to send...</p>
+                ) : unsentIsError ? (
+                  <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-4 space-y-2">
+                    <p className="text-sm font-semibold text-red-300">Couldn't load the preview</p>
+                    <p className="text-xs text-red-200/90 break-words">{(unsentError as Error).message}</p>
+                    <Button size="sm" variant="outline" className="gap-1.5" onClick={() => refetchUnsent()}>
+                      <RefreshCw className="h-3.5 w-3.5" /> Retry
+                    </Button>
+                  </div>
+                ) : (
+                  <>
+                    <div className="rounded-lg border border-card-border p-3 space-y-1">
+                      <p className="text-sm"><span className="font-bold text-primary">{unsentData?.readyToSend ?? 0}</span> invoice{unsentData?.readyToSend === 1 ? "" : "s"} ready to email</p>
+                      {!!unsentData?.noEmailOnFile && (
+                        <p className="text-xs text-muted-foreground">{unsentData.noEmailOnFile} more have no email on file — those stay unsent, you'll need to reach them another way</p>
+                      )}
+                    </div>
+                    {unsentData && unsentData.preview.length > 0 && (
+                      <div className="max-h-48 overflow-y-auto space-y-1.5">
+                        {unsentData.preview.map(r => (
+                          <div key={r.id} className="flex items-center justify-between text-xs border-b border-card-border pb-1.5">
+                            <span className="font-mono">{r.invoiceNumber}</span>
+                            <span className="truncate flex-1 mx-2">{r.billToName}</span>
+                            <span className="text-muted-foreground truncate max-w-[140px]">{r.billToEmail}</span>
+                          </div>
+                        ))}
+                        {unsentData.readyToSend > unsentData.preview.length && (
+                          <p className="text-xs text-muted-foreground pt-1">+{unsentData.readyToSend - unsentData.preview.length} more</p>
+                        )}
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setShowSendAllInvoices(false)}>Close</Button>
+                {!sendAllResult && (
+                  <Button
+                    disabled={!unsentData?.readyToSend || sendAllInvoices.isPending}
+                    onClick={() => sendAllInvoices.mutate()}
+                    data-testid="submit-send-all-invoices"
+                  >
+                    {sendAllInvoices.isPending ? "Sending..." : `Email ${unsentData?.readyToSend || ""} invoice${unsentData?.readyToSend === 1 ? "" : "s"}`}
+                  </Button>
+                )}
               </DialogFooter>
             </DialogContent>
           </Dialog>
