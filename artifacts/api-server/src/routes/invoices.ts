@@ -81,11 +81,39 @@ function startOfCurrentMonth(): Date {
   return new Date(now.getFullYear(), now.getMonth(), 1);
 }
 
+// Resolves a target billing month from an optional "YYYY-MM" string, e.g.
+// catching up an unsent past month. Falls back to the current calendar month
+// when omitted/invalid, which keeps every existing unparameterized caller
+// working exactly as before. Returns a start/end pair (end exclusive) so the
+// "already invoiced" check can't leak across month boundaries.
+function resolveMonthRange(monthParam: unknown): { start: Date; end: Date; isCurrent: boolean } {
+  const now = new Date();
+  if (typeof monthParam === "string" && /^\d{4}-\d{2}$/.test(monthParam)) {
+    const [y, m] = monthParam.split("-").map(Number);
+    const start = new Date(y, m - 1, 1);
+    const end = new Date(y, m, 1);
+    const isCurrent = start.getFullYear() === now.getFullYear() && start.getMonth() === now.getMonth();
+    return { start, end, isCurrent };
+  }
+  const start = startOfCurrentMonth();
+  const end = new Date(start.getFullYear(), start.getMonth() + 1, 1);
+  return { start, end, isCurrent: true };
+}
+
+// Invoice date to use for a given target month: "now" for the current month
+// (preserves the exact original behaviour), or the 1st of the month for a
+// backdated catch-up run (e.g. generating last month's invoices today).
+function invoiceDateForMonth(range: { start: Date; isCurrent: boolean }): Date {
+  return range.isCurrent ? new Date() : range.start;
+}
+
 // Preview — admin only. Returns every "monthly" commitment that doesn't already
-// have an invoice dated this calendar month, with the rate that would be charged.
-// Nothing is written here; the admin reviews/deselects in the UI, then confirms
-// via bulk-generate. Once-off (R3,000) commitments are excluded by definition —
-// this only ever looks at commitmentType === "monthly".
+// have an invoice dated in the target calendar month (defaults to this month;
+// pass ?month=YYYY-MM to catch up a past month), with the rate that would be
+// charged. Nothing is written here; the admin reviews/deselects in the UI, then
+// confirms via bulk-generate. Once-off (R3,000) commitments are excluded by
+// definition — this only ever looks at commitmentType === "monthly" (they get
+// their own one-time invoice via /invoices/onceoff-preview + onceoff-generate).
 //
 // IMPORTANT: this route must stay registered ABOVE GET /invoices/:id. Express
 // matches routes in registration order, so if /invoices/:id comes first it
@@ -97,7 +125,7 @@ router.get("/invoices/bulk-preview", async (req, res) => {
     return;
   }
   try {
-    const monthStart = startOfCurrentMonth();
+    const { start, end } = resolveMonthRange(req.query.month);
 
     const monthly = await db
       .select()
@@ -107,7 +135,9 @@ router.get("/invoices/bulk-preview", async (req, res) => {
     const alreadyInvoiced = await db
       .select({ commitmentId: invoicesTable.commitmentId })
       .from(invoicesTable)
-      .where(sql`${invoicesTable.commitmentId} is not null and ${invoicesTable.invoiceDate} >= ${monthStart}`);
+      .where(
+        sql`${invoicesTable.commitmentId} is not null and ${invoicesTable.invoiceDate} >= ${start} and ${invoicesTable.invoiceDate} < ${end}`,
+      );
     const invoicedIds = new Set(alreadyInvoiced.map(r => r.commitmentId));
 
     const eligible = monthly
@@ -125,6 +155,133 @@ router.get("/invoices/bulk-preview", async (req, res) => {
   } catch (err) {
     req.log.error(err);
     res.status(500).json({ error: "Failed to build bulk invoice preview" });
+  }
+});
+
+// ── Once-off (R3,000) signups: one invoice each, ever ───────────────────────
+// These residents prepaid a lump sum instead of joining the monthly cycle, but
+// still need an invoice on record so their account balance matches everyone
+// else's — marked "paid" immediately if we already have paymentConfirmed=true
+// on their commitment, "unpaid" otherwise. Guarded so a commitment can only
+// ever receive ONE invoice via this route (checked by commitmentId having any
+// invoice at all, not just one this month) — safe to click more than once.
+const ONCEOFF_AMOUNT = 3000;
+
+router.get("/invoices/onceoff-preview", async (req, res) => {
+  if (!isAdminReq(req.headers)) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+  try {
+    const onceoff = await db
+      .select()
+      .from(commitmentsTable)
+      .where(eq(commitmentsTable.commitmentType, "onceoff"));
+
+    const alreadyInvoiced = await db
+      .select({ commitmentId: invoicesTable.commitmentId })
+      .from(invoicesTable)
+      .where(sql`${invoicesTable.commitmentId} is not null`);
+    const invoicedIds = new Set(alreadyInvoiced.map(r => r.commitmentId));
+
+    const eligible = onceoff
+      .filter(c => !invoicedIds.has(c.id))
+      .map(c => ({
+        commitmentId: c.id,
+        fullName: c.fullName,
+        street: c.street,
+        houseNumber: c.houseNumber,
+        email: c.email,
+        amount: ONCEOFF_AMOUNT,
+        willBeMarkedPaid: c.paymentConfirmed,
+      }));
+
+    res.json({ eligible, alreadyInvoiced: onceoff.length - eligible.length });
+  } catch (err) {
+    req.log.error(err);
+    res.status(500).json({ error: "Failed to build once-off invoice preview" });
+  }
+});
+
+router.post("/invoices/onceoff-generate", async (req, res) => {
+  if (!isAdminReq(req.headers)) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+  const body = req.body as Record<string, unknown>;
+  const commitmentIds = Array.isArray(body.commitmentIds)
+    ? (body.commitmentIds as unknown[]).filter((n): n is number => typeof n === "number" && Number.isInteger(n))
+    : [];
+  if (commitmentIds.length === 0) {
+    res.status(400).json({ error: "commitmentIds must be a non-empty array" });
+    return;
+  }
+
+  const created: string[] = [];
+  const skipped: { commitmentId: number; reason: string }[] = [];
+  const createdBy = createdByFromReq(req.headers as Record<string, unknown>);
+
+  try {
+    for (const commitmentId of commitmentIds) {
+      const [commitment] = await db.select().from(commitmentsTable).where(eq(commitmentsTable.id, commitmentId));
+      if (!commitment) {
+        skipped.push({ commitmentId, reason: "Commitment not found" });
+        continue;
+      }
+      if (commitment.commitmentType !== "onceoff") {
+        skipped.push({ commitmentId, reason: "Not a once-off commitment" });
+        continue;
+      }
+      const [existing] = await db
+        .select({ id: invoicesTable.id })
+        .from(invoicesTable)
+        .where(sql`${invoicesTable.commitmentId} = ${commitmentId}`);
+      if (existing) {
+        skipped.push({ commitmentId, reason: "Already has an invoice on record" });
+        continue;
+      }
+
+      // Dated to when they actually committed/paid, not today — this is a
+      // record of a past payment, not a new charge.
+      const invoiceDate = new Date(commitment.submittedAt);
+      const dueDate = new Date(invoiceDate.getTime() + 15 * 24 * 60 * 60 * 1000);
+      const invoiceNumber = await nextInvoiceNumber();
+      const status = commitment.paymentConfirmed ? "paid" : "unpaid";
+
+      const [invoice] = await db
+        .insert(invoicesTable)
+        .values({
+          invoiceNumber,
+          commitmentId,
+          billToName: commitment.fullName,
+          billToStreet: commitment.street,
+          billToHouseNumber: commitment.houseNumber,
+          billToEmail: commitment.email,
+          invoiceDate,
+          dueDate,
+          status,
+          subtotal: ONCEOFF_AMOUNT,
+          total: ONCEOFF_AMOUNT,
+          notes: "Once-off registration contribution — recorded for account history.",
+          createdBy,
+        })
+        .returning();
+
+      await db.insert(invoiceLineItemsTable).values({
+        invoiceId: invoice.id,
+        description: "Once-off registration contribution",
+        quantity: 1,
+        unitAmount: ONCEOFF_AMOUNT,
+        amount: ONCEOFF_AMOUNT,
+      });
+
+      created.push(invoiceNumber);
+    }
+
+    res.status(201).json({ created, skipped, createdCount: created.length, skippedCount: skipped.length });
+  } catch (err) {
+    req.log.error(err);
+    res.status(500).json({ error: "Failed to generate once-off invoices" });
   }
 });
 
@@ -348,10 +505,13 @@ router.post("/invoices", async (req, res) => {
   }
 });
 
-// Generate — admin only. Body: { commitmentIds: number[] } — exactly the set the
-// admin kept after reviewing the preview (anyone they unchecked, e.g. a once-off
-// payer that slipped through, is simply left out). Re-checks eligibility per ID
-// so nothing gets double-invoiced even if the preview is stale.
+// Generate — admin only. Body: { commitmentIds: number[], month? } — exactly
+// the set the admin kept after reviewing the preview (anyone they unchecked,
+// e.g. a once-off payer that slipped through, is simply left out). Pass the
+// same month ("YYYY-MM") used on the bulk-preview call to catch up a past
+// month; omit it for the current month (unchanged default behaviour).
+// Re-checks eligibility per ID so nothing gets double-invoiced even if the
+// preview is stale.
 router.post("/invoices/bulk-generate", async (req, res) => {
   if (!isAdminReq(req.headers)) {
     res.status(401).json({ error: "Unauthorized" });
@@ -368,7 +528,7 @@ router.post("/invoices/bulk-generate", async (req, res) => {
 
   const created: string[] = [];
   const skipped: { commitmentId: number; reason: string }[] = [];
-  const monthStart = startOfCurrentMonth();
+  const range = resolveMonthRange(body.month);
   const createdBy = createdByFromReq(req.headers as Record<string, unknown>);
 
   try {
@@ -386,15 +546,15 @@ router.post("/invoices/bulk-generate", async (req, res) => {
         .select({ id: invoicesTable.id })
         .from(invoicesTable)
         .where(
-          sql`${invoicesTable.commitmentId} = ${commitmentId} and ${invoicesTable.invoiceDate} >= ${monthStart}`,
+          sql`${invoicesTable.commitmentId} = ${commitmentId} and ${invoicesTable.invoiceDate} >= ${range.start} and ${invoicesTable.invoiceDate} < ${range.end}`,
         );
       if (existing) {
-        skipped.push({ commitmentId, reason: "Already invoiced this month" });
+        skipped.push({ commitmentId, reason: "Already invoiced for that month" });
         continue;
       }
 
       const rate = monthlyRateForStreet(commitment.street);
-      const invoiceDate = new Date();
+      const invoiceDate = invoiceDateForMonth(range);
       // 15-day due date, per Ingrid (treasurer) — matches the default on the manual create form.
       const dueDate = new Date(invoiceDate.getTime() + 15 * 24 * 60 * 60 * 1000);
       const invoiceNumber = await nextInvoiceNumber();
