@@ -16,6 +16,7 @@
     "cors": "^2",
     "drizzle-orm": "catalog:",
     "express": "^5",
+    "pdf-lib": "^1.17.1",
     "pino": "^9",
     "pino-http": "^10"
   },
