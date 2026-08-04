@@ -3,6 +3,7 @@ import { db, invoicesTable, invoiceLineItemsTable, commitmentsTable } from "@wor
 import { eq, desc, sql, and, isNull } from "drizzle-orm";
 import { isAdminReq, adminRoleFromHeaders, PRIMARY_USERNAME, SECONDARY_USERNAME } from "../lib/admin-auth";
 import { sendEmail } from "../lib/email";
+import { buildInvoicePdf } from "../lib/invoice-pdf";
 
 const router = Router();
 
@@ -388,7 +389,7 @@ router.post("/invoices/send-all", async (req, res) => {
       const subject = `KCEA invoice ${inv.invoiceNumber}`;
       const text =
         `Hi ${inv.billToName},\n\n` +
-        `Here's your KCEA invoice ${inv.invoiceNumber}.\n\n` +
+        `Here's your KCEA invoice ${inv.invoiceNumber} — a PDF copy is attached.\n\n` +
         `${itemsText}\n\n` +
         `Total due: R${inv.total.toLocaleString("en-ZA")}\n` +
         `Due date: ${dueDateStr}\n\n` +
@@ -402,7 +403,34 @@ router.post("/invoices/send-all", async (req, res) => {
         `We'll never ask for passwords, card numbers, or bank details by email.\n\n` +
         `— KCEA`;
 
-      const result = await sendEmail(inv.billToEmail as string, subject, text);
+      // Build the PDF attachment. If generation fails for any reason, fall
+      // back to sending the plain-text email rather than blocking the whole
+      // invoice on a rendering bug — matches the resilient style of the rest
+      // of this route (a bad invoice shouldn't stall the batch).
+      let attachments: { filename: string; content: string }[] | undefined;
+      try {
+        const pdfBytes = await buildInvoicePdf({
+          invoiceNumber: inv.invoiceNumber,
+          billToName: inv.billToName,
+          billToStreet: inv.billToStreet,
+          billToHouseNumber: inv.billToHouseNumber,
+          invoiceDate: new Date(inv.invoiceDate),
+          dueDate: new Date(inv.dueDate),
+          lineItems: lineItems.map(li => ({
+            description: li.description,
+            quantity: li.quantity,
+            unitAmount: li.unitAmount,
+            amount: li.amount,
+          })),
+          subtotal: inv.subtotal,
+          total: inv.total,
+        });
+        attachments = [{ filename: `${inv.invoiceNumber}.pdf`, content: Buffer.from(pdfBytes).toString("base64") }];
+      } catch (pdfErr) {
+        req.log.warn({ invoiceId: inv.id, err: pdfErr }, "PDF generation failed — sending without attachment");
+      }
+
+      const result = await sendEmail(inv.billToEmail as string, subject, text, attachments);
       if (result.ok) {
         await db.update(invoicesTable).set({ emailSentAt: new Date() }).where(eq(invoicesTable.id, inv.id));
         sent++;
@@ -419,6 +447,95 @@ router.post("/invoices/send-all", async (req, res) => {
   } catch (err) {
     req.log.error(err);
     res.status(500).json({ error: "Send batch failed" });
+  }
+});
+
+// Send a test copy of ONE invoice (with PDF attached) to any email address —
+// admin only. Deliberately does NOT touch emailSentAt, so a test send never
+// counts as "sent" and can't cause the real invoice to be skipped by
+// /invoices/send-all — safe to click as many times as needed while checking
+// the PDF looks right before running the real batch. Body: { email: string }
+router.post("/invoices/:id/send-test", async (req, res) => {
+  if (!isAdminReq(req.headers)) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+  const id = parseInt(req.params.id, 10);
+  if (isNaN(id)) {
+    res.status(400).json({ error: "Invalid id" });
+    return;
+  }
+  const body = req.body as Record<string, unknown>;
+  const email = typeof body.email === "string" ? body.email.trim() : "";
+  if (!email) {
+    res.status(400).json({ error: "email is required" });
+    return;
+  }
+
+  try {
+    const [inv] = await db.select().from(invoicesTable).where(eq(invoicesTable.id, id));
+    if (!inv) {
+      res.status(404).json({ error: "Not found" });
+      return;
+    }
+    const lineItems = await db.select().from(invoiceLineItemsTable).where(eq(invoiceLineItemsTable.invoiceId, inv.id));
+    const itemsText = lineItems.map(li => `- ${li.description} x${li.quantity}: R${li.amount.toLocaleString("en-ZA")}`).join("\n");
+    const dueDateStr = new Date(inv.dueDate).toLocaleDateString("en-ZA", { day: "numeric", month: "long", year: "numeric" });
+    const reference = [inv.billToHouseNumber, inv.billToStreet].filter(Boolean).join(" ") || inv.billToName;
+
+    const subject = `[TEST] KCEA invoice ${inv.invoiceNumber}`;
+    const text =
+      `TEST SEND — this is a preview copy for checking the layout/PDF, not a real invoice notice.\n\n` +
+      `Hi ${inv.billToName},\n\n` +
+      `Here's your KCEA invoice ${inv.invoiceNumber} — a PDF copy is attached.\n\n` +
+      `${itemsText}\n\n` +
+      `Total due: R${inv.total.toLocaleString("en-ZA")}\n` +
+      `Due date: ${dueDateStr}\n\n` +
+      `Banking details:\n` +
+      `Kensington Central Enclosure Association\n` +
+      `FNB Gold Business Account\n` +
+      `Account number: 63213323693\n` +
+      `Branch code: 250655\n` +
+      `Reference: ${reference}\n\n` +
+      `— KCEA`;
+
+    // Same resilient pattern as send-all: a PDF failure shouldn't block the
+    // test send outright — the caller needs to know the email itself works,
+    // and the response reports whether the PDF actually attached.
+    let attachments: { filename: string; content: string }[] | undefined;
+    let pdfError: string | undefined;
+    try {
+      const pdfBytes = await buildInvoicePdf({
+        invoiceNumber: inv.invoiceNumber,
+        billToName: inv.billToName,
+        billToStreet: inv.billToStreet,
+        billToHouseNumber: inv.billToHouseNumber,
+        invoiceDate: new Date(inv.invoiceDate),
+        dueDate: new Date(inv.dueDate),
+        lineItems: lineItems.map(li => ({
+          description: li.description,
+          quantity: li.quantity,
+          unitAmount: li.unitAmount,
+          amount: li.amount,
+        })),
+        subtotal: inv.subtotal,
+        total: inv.total,
+      });
+      attachments = [{ filename: `${inv.invoiceNumber}.pdf`, content: Buffer.from(pdfBytes).toString("base64") }];
+    } catch (pdfErr) {
+      req.log.warn({ invoiceId: inv.id, err: pdfErr }, "Test send: PDF generation failed");
+      pdfError = pdfErr instanceof Error ? pdfErr.message : String(pdfErr);
+    }
+
+    const result = await sendEmail(email, subject, text, attachments);
+    if (!result.ok) {
+      res.status(502).json({ error: `Send failed: ${result.reason}`, pdfAttached: !!attachments, pdfError });
+      return;
+    }
+    res.json({ ok: true, pdfAttached: !!attachments, pdfError });
+  } catch (err) {
+    req.log.error(err);
+    res.status(500).json({ error: "Failed to send test invoice" });
   }
 });
 

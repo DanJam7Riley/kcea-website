@@ -2738,6 +2738,37 @@ export default function Admin() {
                             <Printer className="h-3.5 w-3.5" /> Print
                           </Button>
                           <Button
+                              size="sm"
+                              variant="outline"
+                              className="gap-1.5"
+                              onClick={async () => {
+                                    const email = window.prompt(`Send a test copy of ${inv.invoiceNumber} to which email address?`, "");
+                                    if (!email || !email.trim()) return;
+                                    try {
+                                            const res = await fetch(`${BASE}/api/invoices/${inv.id}/send-test`, {
+                                                      method: "POST",
+                                                      headers: { ...authHeaders, "Content-Type": "application/json" },
+                                                      body: JSON.stringify({ email: email.trim() }),
+                                            });
+                                            const data = await res.json().catch(() => ({}));
+                                            if (!res.ok) {
+                                                      alert(`Test send failed: ${data.error ?? res.status}`);
+                                                      return;
+                                            }
+                                            alert(
+                                                      data.pdfAttached
+                                                        ? `Test email sent to ${email.trim()} with the PDF attached.`
+                                                        : `Test email sent to ${email.trim()}, but the PDF failed to attach${data.pdfError ? `: ${data.pdfError}` : ""}. Sent as plain text instead.`,
+                                                    );
+                                    } catch (err) {
+                                            alert(`Test send failed: ${(err as Error).message}`);
+                                    }
+                              }}
+                              data-testid={`send-test-invoice-${inv.id}`}
+                            >
+                            <Mail className="h-3.5 w-3.5" /> Send test
+                          </Button>
+                          <Button
                             size="sm"
                             variant="outline"
                             className="gap-1.5 text-red-400 hover:text-red-300"
