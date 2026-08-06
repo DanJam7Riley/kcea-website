@@ -399,6 +399,7 @@ router.post("/invoices/send-all", async (req, res) => {
         `Account number: 63213323693\n` +
         `Branch code: 250655\n` +
         `Reference: ${reference}\n\n` +
+        `If you've already paid this, please ignore this email.\n\n` +
         `Questions? Contact your street captain, or message KCEA on WhatsApp before paying if anything looks off. ` +
         `We'll never ask for passwords, card numbers, or bank details by email.\n\n` +
         `— KCEA`;
@@ -497,6 +498,7 @@ router.post("/invoices/:id/send-test", async (req, res) => {
       `Account number: 63213323693\n` +
       `Branch code: 250655\n` +
       `Reference: ${reference}\n\n` +
+      `If you've already paid this, please ignore this email.\n\n` +
       `— KCEA`;
 
     // Same resilient pattern as send-all: a PDF failure shouldn't block the
