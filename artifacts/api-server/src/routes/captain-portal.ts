@@ -1,11 +1,20 @@
 import { Router } from "express";
-import { createHmac, randomBytes } from "crypto";
+import { createHmac, randomBytes, timingSafeEqual } from "crypto";
 import { db, captainProfilesTable, captainTokensTable, streetCaptainsTable, commitmentsTable, propertyNotesTable, streetHousesTable, captainResidentContactsTable } from "@workspace/db";
 import { eq, and, inArray, gt, desc } from "drizzle-orm";
+import { sendEmail } from "../lib/email";
 
 const router = Router();
 import { isAdminReq } from "../lib/admin-auth";
 const TOKEN_TTL_MS = 24 * 60 * 60 * 1000;
+
+// PIN reset/setup links (see "PIN self-service" section below): a self-service
+// "forgot PIN" request gets a short-lived link (used right away, in one sitting).
+// An admin-triggered bulk "set up your PIN" blast gets a much longer window,
+// since captains won't all click within the same half hour.
+const PIN_RESET_TTL_MS = 30 * 60 * 1000;       // 30 minutes
+const PIN_SETUP_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
+const SITE_URL = process.env.PUBLIC_SITE_URL ?? "https://www.kcea.co.za";
 
 const SEEDED_CAPTAIN_NAMES = [
   "Carina", "Ingrid Bester", "Priscilla", "Jo-Anne", "Geoff",
@@ -49,6 +58,91 @@ async function seedProfiles() {
   if (toInsert.length > 0) {
     await db.insert(captainProfilesTable).values(toInsert.map(name => ({ name })));
   }
+}
+
+// ── PIN self-service (forgot-PIN + admin bulk "set up your PIN") ──────────
+// Deliberately stateless — no new tokens table. Mirrors the signed-session
+// pattern already used in me-update.ts (signSession/verifySession) and the
+// deterministic-token pattern in legacy-confirm.ts: an HMAC of the payload,
+// keyed by SESSION_SECRET, with the expiry embedded in the signed payload
+// itself so it can be verified without a DB lookup. Namespaced "pinreset:"
+// so a token minted here can never be replayed against the unrelated
+// legacy-confirm or update-my-details flows even though they share the
+// same secret.
+function signPinResetToken(profileId: number, exp: number): string {
+  const secret = process.env.SESSION_SECRET ?? "kcea-dev-secret";
+  const payload = `${profileId}.${exp}`;
+  const sig = createHmac("sha256", secret).update(`pinreset:${payload}`).digest("hex");
+  return `${payload}.${sig}`;
+}
+
+function verifyPinResetToken(token: string): { profileId: number } | null {
+  if (typeof token !== "string") return null;
+  const parts = token.split(".");
+  if (parts.length !== 3) return null;
+  const [idStr, expStr, sig] = parts;
+  const profileId = Number(idStr);
+  const exp = Number(expStr);
+  if (!Number.isInteger(profileId) || !Number.isInteger(exp)) return null;
+  if (Date.now() > exp) return null;
+  const secret = process.env.SESSION_SECRET ?? "kcea-dev-secret";
+  const expected = createHmac("sha256", secret).update(`pinreset:${idStr}.${expStr}`).digest("hex");
+  try {
+    const a = Buffer.from(sig, "hex");
+    const b = Buffer.from(expected, "hex");
+    if (a.length !== b.length) return null;
+    if (!timingSafeEqual(a, b)) return null;
+  } catch {
+    return null;
+  }
+  return { profileId };
+}
+
+// captain_profiles has no email column — captains' emails already live on
+// street_captains (collected when they signed up as a captain), joined here
+// by name, same join used everywhere else in this file (getStreetsForCaptain).
+const isUsableEmail = (e: string | null | undefined) => !!e && e.trim() !== "";
+
+async function findProfileByEmail(emailRaw: string) {
+  const email = emailRaw.trim().toLowerCase();
+  if (!email) return null;
+  const scRows = await db
+    .select({ captain: streetCaptainsTable.captain, email: streetCaptainsTable.email })
+    .from(streetCaptainsTable);
+  const matchNames = new Set(
+    scRows.filter(r => isUsableEmail(r.email) && r.email!.trim().toLowerCase() === email).map(r => r.captain),
+  );
+  if (matchNames.size === 0) return null;
+  const profiles = await db.select().from(captainProfilesTable);
+  return profiles.find(p => matchNames.has(p.name)) ?? null;
+}
+
+async function getEmailForProfile(profileName: string): Promise<string | null> {
+  const rows = await db
+    .select({ email: streetCaptainsTable.email })
+    .from(streetCaptainsTable)
+    .where(eq(streetCaptainsTable.captain, profileName));
+  const found = rows.find(r => isUsableEmail(r.email));
+  return found?.email ?? null;
+}
+
+function buildPinEmail(captainName: string, url: string, isSetup: boolean) {
+  const subject = isSetup ? "Set up your KCEA Captain Portal PIN" : "Reset your KCEA Captain Portal PIN";
+  const expiryText = isSetup ? "7 days" : "30 minutes";
+  const text = isSetup
+    ? `Hi ${captainName},\n\n` +
+      `You're a KCEA street captain — this is your link to set up your own login PIN for the Captain Portal ` +
+      `(so you don't need to wait on us to send you one).\n\n` +
+      `Set your PIN here (link expires in ${expiryText}): ${url}\n\n` +
+      `Once it's set, sign in any time at ${SITE_URL}/captain with your phone number and PIN.\n\n` +
+      `Not expecting this? Contact KCEA before clicking. We'll never ask for passwords or bank details by email.\n\n` +
+      `— KCEA`
+    : `Hi ${captainName},\n\n` +
+      `We received a request to reset your KCEA Captain Portal PIN.\n\n` +
+      `Set a new PIN here (link expires in ${expiryText}): ${url}\n\n` +
+      `If you didn't request this, you can ignore this email — your existing PIN stays the same.\n\n` +
+      `— KCEA`;
+  return { subject, text };
 }
 
 // POST /api/captain/login
@@ -98,6 +192,81 @@ router.post("/captain/login", async (req, res) => {
   } catch (err) {
     req.log.error(err);
     res.status(500).json({ error: "Login failed" });
+  }
+});
+
+// POST /api/captain/forgot-pin — public, enumeration-safe (always uniform response)
+router.post("/captain/forgot-pin", async (req, res) => {
+  const body = req.body as Record<string, unknown>;
+  const email = typeof body.email === "string" ? body.email.trim() : "";
+  const uniform = {
+    ok: true,
+    message: "If that email is on file for a street captain, we've sent a link to set a new PIN. It expires in 30 minutes.",
+  };
+  if (!email) { res.json(uniform); return; }
+
+  try {
+    const profile = await findProfileByEmail(email);
+    if (!profile) {
+      req.log.info({ emailDomain: email.split("@")[1] ?? "" }, "Forgot-PIN requested for unknown email — returning uniform success");
+      res.json(uniform);
+      return;
+    }
+    const exp = Date.now() + PIN_RESET_TTL_MS;
+    const token = signPinResetToken(profile.id, exp);
+    const url = `${SITE_URL}/captain/reset-pin?token=${token}`;
+    const { subject, text } = buildPinEmail(profile.name, url, false);
+    const result = await sendEmail(email, subject, text);
+    if (!result.ok) {
+      req.log.warn({ profileId: profile.id, reason: result.reason }, "Forgot-PIN email failed to send");
+    } else {
+      req.log.info({ profileId: profile.id }, "Forgot-PIN email sent");
+    }
+    res.json(uniform);
+  } catch (err) {
+    req.log.error(err);
+    res.json(uniform); // stay uniform even on internal error — don't leak state
+  }
+});
+
+// GET /api/captain/reset-pin/info?token=... — public, token-gated. Lets the
+// reset page greet the captain by name before they type a new PIN.
+router.get("/captain/reset-pin/info", async (req, res) => {
+  const token = typeof req.query.token === "string" ? req.query.token : "";
+  const session = verifyPinResetToken(token);
+  if (!session) { res.status(401).json({ error: "expired", message: "This link has expired or is invalid. Please request a new one." }); return; }
+  try {
+    const [profile] = await db.select().from(captainProfilesTable).where(eq(captainProfilesTable.id, session.profileId)).limit(1);
+    if (!profile) { res.status(404).json({ error: "not_found" }); return; }
+    res.json({ captainName: profile.name });
+  } catch (err) {
+    req.log.error(err);
+    res.status(500).json({ error: "internal" });
+  }
+});
+
+// POST /api/captain/reset-pin — public, token-gated. The actual PIN set/reset.
+router.post("/captain/reset-pin", async (req, res) => {
+  const body = req.body as Record<string, unknown>;
+  const token = typeof body.token === "string" ? body.token : "";
+  const pin = typeof body.pin === "string" ? body.pin.trim() : "";
+
+  const session = verifyPinResetToken(token);
+  if (!session) { res.status(401).json({ error: "expired", message: "This link has expired or is invalid. Please request a new one." }); return; }
+  if (!/^\d{4}$/.test(pin)) { res.status(400).json({ error: "invalid_pin", message: "PIN must be exactly 4 digits." }); return; }
+
+  try {
+    const [updated] = await db
+      .update(captainProfilesTable)
+      .set({ pin, pinHash: hashPin(pin) })
+      .where(eq(captainProfilesTable.id, session.profileId))
+      .returning();
+    if (!updated) { res.status(404).json({ error: "not_found" }); return; }
+    req.log.info({ profileId: updated.id }, "Captain set their own PIN via email link");
+    res.json({ ok: true, captainName: updated.name });
+  } catch (err) {
+    req.log.error(err);
+    res.status(500).json({ error: "internal", message: "Something went wrong. Please try again." });
   }
 });
 
@@ -453,6 +622,56 @@ router.post("/captain/management/:id/mark-pin-sent", async (req, res) => {
   } catch (err) {
     req.log.error(err);
     res.status(500).json({ error: "Failed to mark PIN sent" });
+  }
+});
+
+// POST /api/captain/management/send-pin-setup-emails — admin bulk action.
+// Requires { confirm: true } as a deliberate double-check against firing it
+// by accident (same guard pattern as /commitments/legacy-unconfirmed/send).
+// For every captain profile, looks up their email via street_captains (by
+// name), sends a "set up your PIN" link (7-day expiry — a blast email won't
+// all get clicked within 30 minutes), and marks pinSentAt. Captains with no
+// email on file are returned in noEmailOnFile so they can be chased another
+// way (e.g. the existing WhatsApp "Send PIN" flow).
+router.post("/captain/management/send-pin-setup-emails", async (req, res) => {
+  if (!isAdminReq(req.headers)) { res.status(401).json({ error: "Unauthorized" }); return; }
+  const body = req.body as Record<string, unknown>;
+  if (body.confirm !== true) {
+    res.status(400).json({ error: "Refusing to send — pass { \"confirm\": true } in the request body." });
+    return;
+  }
+
+  try {
+    await seedProfiles();
+    const profiles = await db.select().from(captainProfilesTable).orderBy(captainProfilesTable.name);
+
+    let sent = 0;
+    const noEmailOnFile: string[] = [];
+    const failed: string[] = [];
+
+    for (const profile of profiles) {
+      const email = await getEmailForProfile(profile.name);
+      if (!email) { noEmailOnFile.push(profile.name); continue; }
+
+      const exp = Date.now() + PIN_SETUP_TTL_MS;
+      const token = signPinResetToken(profile.id, exp);
+      const url = `${SITE_URL}/captain/reset-pin?token=${token}`;
+      const { subject, text } = buildPinEmail(profile.name, url, true);
+
+      const result = await sendEmail(email, subject, text);
+      if (result.ok) {
+        await db.update(captainProfilesTable).set({ pinSentAt: new Date() }).where(eq(captainProfilesTable.id, profile.id));
+        sent++;
+      } else {
+        req.log.warn({ profileId: profile.id, reason: result.reason }, "PIN setup email failed to send");
+        failed.push(profile.name);
+      }
+    }
+
+    res.json({ sent, noEmailOnFile, failed });
+  } catch (err) {
+    req.log.error(err);
+    res.status(500).json({ error: "Send batch failed" });
   }
 });
 
