@@ -6,6 +6,7 @@ import NotFound from "@/pages/not-found";
 import Home from "@/pages/Home";
 import Admin from "@/pages/Admin";
 import CaptainPortal from "@/pages/CaptainPortal";
+import CaptainResetPin from "@/pages/CaptainResetPin";
 import Update from "@/pages/Update";
 import MeUpdate from "@/pages/MeUpdate";
 import Pledge from "@/pages/Pledge";
@@ -20,6 +21,7 @@ function Router() {
       <Route path="/admin" component={Admin} />
       <Route path="/captain" component={CaptainPortal} />
       <Route path="/captain-login" component={CaptainPortal} />
+      <Route path="/captain/reset-pin" component={CaptainResetPin} />
       <Route path="/update" component={Update} />
       <Route path="/me/update" component={MeUpdate} />
       <Route path="/pledge" component={Pledge} />
