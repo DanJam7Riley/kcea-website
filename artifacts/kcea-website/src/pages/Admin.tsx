@@ -1071,6 +1071,24 @@ export default function Admin() {
       setTimeout(() => setWhatsappSaved(false), 3000);
     },
   });
+  const [pinSetupResult, setPinSetupResult] = useState<string | null>(null);
+  const sendPinSetupEmails = useMutation({
+    mutationFn: () =>
+      fetch(`${BASE}/api/captain/management/send-pin-setup-emails`, {
+        method: "POST",
+        headers: { ...authHeaders, "Content-Type": "application/json" },
+        body: JSON.stringify({ confirm: true }),
+      }).then(async r => { if (!r.ok) throw new Error(await r.text()); return r.json(); }),
+    onSuccess: (d: { sent: number; noEmailOnFile: string[]; failed: string[] }) => {
+      setPinSetupResult(
+        `Sent ${d.sent} email${d.sent === 1 ? "" : "s"}.` +
+        (d.noEmailOnFile.length ? ` No email on file: ${d.noEmailOnFile.join(", ")}.` : "") +
+        (d.failed.length ? ` Failed: ${d.failed.join(", ")}.` : "")
+        );
+      qc.invalidateQueries({ queryKey: ["captain-profiles"] });
+    },
+    onError: () => setPinSetupResult("Failed to send. Check console."),
+  });
 
   const { data: captainNotes = [] } = useQuery<CaptainNote[]>({
     queryKey: ["captain-notes"],
@@ -1801,6 +1819,10 @@ export default function Admin() {
               <p className="text-sm text-muted-foreground mt-1">
                 Active captains appear on the homepage. Toggle a row's role to promote a pending volunteer or demote an active captain.
               </p>
+              <Button size="sm" variant="outline" className="mt-2" onClick={() => sendPinSetupEmails.mutate()} disabled={sendPinSetupEmails.isPending} data-testid="button-send-pin-setup-emails">{sendPinSetupEmails.isPending ? "Sending…" : "Email All Captains: Set Up PIN"}</Button>
+              {pinSetupResult && (
+            <p className="text-xs text-muted-foreground mt-1" data-testid="text-pin-setup-result">{pinSetupResult}</p>
+            )}
             </CardHeader>
             <CardContent>
               <div className="mb-4 space-y-2" data-testid="captain-filters">
