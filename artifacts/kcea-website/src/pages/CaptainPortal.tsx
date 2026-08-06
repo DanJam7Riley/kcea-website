@@ -181,6 +181,31 @@ export default function CaptainPortal() {
   const [loginError, setLoginError] = useState("");
   const [loginLoading, setLoginLoading] = useState(false);
 
+  // ── Forgot PIN (self-service, email-based) ─────────────────────
+  const [showForgotPin, setShowForgotPin] = useState(false);
+  const [forgotEmail, setForgotEmail] = useState("");
+  const [forgotSubmitting, setForgotSubmitting] = useState(false);
+  const [forgotMessage, setForgotMessage] = useState("");
+
+  const handleForgotPin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setForgotSubmitting(true);
+    setForgotMessage("");
+    try {
+      const res = await fetch(`${BASE}/api/captain/forgot-pin`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: forgotEmail.trim() }),
+      });
+      const data = await res.json() as { message?: string };
+      setForgotMessage(data.message ?? "If that email is on file, we've sent a link to set a new PIN.");
+    } catch {
+      setForgotMessage("Unable to connect. Please try again.");
+    } finally {
+      setForgotSubmitting(false);
+    }
+  };
+
   const [dashboard, setDashboard] = useState<DashboardData | null>(null);
   const [dashLoading, setDashLoading] = useState(false);
 
@@ -359,50 +384,106 @@ export default function CaptainPortal() {
               </p>
             </CardHeader>
             <CardContent>
-              <form onSubmit={handleLogin} className="space-y-4">
-                <div className="space-y-2">
-                  <Label htmlFor="phone">Phone Number</Label>
-                  <Input
-                    id="phone"
-                    type="tel"
-                    placeholder="+27 82 123 4567"
-                    value={phone}
-                    onChange={e => setPhone(e.target.value)}
-                    required
-                    className="bg-background border-border"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="pin">4-Digit PIN</Label>
-                  <Input
-                    id="pin"
-                    type="password"
-                    placeholder="••••"
-                    value={pin}
-                    onChange={e => setPin(e.target.value.replace(/\D/g, "").slice(0, 4))}
-                    required
-                    maxLength={4}
-                    inputMode="numeric"
-                    className="bg-background border-border tracking-[0.5em] text-center text-lg"
-                  />
-                </div>
-                {loginError && (
-                  <div className="flex items-center gap-2 text-sm text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2">
-                    <XCircle className="h-4 w-4 shrink-0" />
-                    {loginError}
+              {!showForgotPin ? (
+                <>
+                  <form onSubmit={handleLogin} className="space-y-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="phone">Phone Number</Label>
+                      <Input
+                        id="phone"
+                        type="tel"
+                        placeholder="+27 82 123 4567"
+                        value={phone}
+                        onChange={e => setPhone(e.target.value)}
+                        required
+                        className="bg-background border-border"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="pin">4-Digit PIN</Label>
+                      <Input
+                        id="pin"
+                        type="password"
+                        placeholder="••••"
+                        value={pin}
+                        onChange={e => setPin(e.target.value.replace(/\D/g, "").slice(0, 4))}
+                        required
+                        maxLength={4}
+                        inputMode="numeric"
+                        className="bg-background border-border tracking-[0.5em] text-center text-lg"
+                      />
+                    </div>
+                    {loginError && (
+                      <div className="flex items-center gap-2 text-sm text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2">
+                        <XCircle className="h-4 w-4 shrink-0" />
+                        {loginError}
+                      </div>
+                    )}
+                    <Button
+                      type="submit"
+                      className="w-full bg-primary text-primary-foreground"
+                      disabled={loginLoading || pin.length < 4}
+                    >
+                      {loginLoading ? "Signing in…" : "Sign In"}
+                    </Button>
+                  </form>
+                  <div className="text-center mt-4 space-y-1">
+                    <button
+                      type="button"
+                      onClick={() => { setShowForgotPin(true); setForgotMessage(""); }}
+                      className="text-xs text-primary hover:underline"
+                      data-testid="link-forgot-pin"
+                    >
+                      Forgot your PIN?
+                    </button>
+                    <p className="text-xs text-muted-foreground">
+                      Contact the KCEA admin to set up your access.
+                    </p>
                   </div>
-                )}
-                <Button
-                  type="submit"
-                  className="w-full bg-primary text-primary-foreground"
-                  disabled={loginLoading || pin.length < 4}
-                >
-                  {loginLoading ? "Signing in…" : "Sign In"}
-                </Button>
-              </form>
-              <p className="text-xs text-muted-foreground text-center mt-4">
-                Contact the KCEA admin to set up your access.
-              </p>
+                </>
+              ) : (
+                <div className="space-y-4">
+                  <p className="text-sm text-muted-foreground">
+                    Enter the email address KCEA has on file for you as a street captain, and we'll send a link to set a new PIN.
+                  </p>
+                  <form onSubmit={handleForgotPin} className="space-y-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="forgot-email">Email Address</Label>
+                      <Input
+                        id="forgot-email"
+                        type="email"
+                        placeholder="you@example.com"
+                        value={forgotEmail}
+                        onChange={e => setForgotEmail(e.target.value)}
+                        required
+                        className="bg-background border-border"
+                        data-testid="input-forgot-email"
+                      />
+                    </div>
+                    {forgotMessage && (
+                      <div className="flex items-center gap-2 text-sm text-primary bg-primary/10 border border-primary/20 rounded-lg px-3 py-2">
+                        <CheckCircle className="h-4 w-4 shrink-0" />
+                        {forgotMessage}
+                      </div>
+                    )}
+                    <Button
+                      type="submit"
+                      className="w-full bg-primary text-primary-foreground"
+                      disabled={forgotSubmitting || !forgotEmail.trim()}
+                      data-testid="button-send-forgot-pin"
+                    >
+                      {forgotSubmitting ? "Sending…" : "Send Reset Link"}
+                    </Button>
+                    <button
+                      type="button"
+                      onClick={() => { setShowForgotPin(false); setForgotMessage(""); }}
+                      className="w-full text-xs text-muted-foreground hover:text-primary transition-colors"
+                    >
+                      ← Back to sign in
+                    </button>
+                  </form>
+                </div>
+              )}
             </CardContent>
           </Card>
         </div>
