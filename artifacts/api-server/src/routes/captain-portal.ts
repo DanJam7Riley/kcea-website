@@ -146,13 +146,18 @@ function buildPinEmail(captainName: string, url: string, isSetup: boolean) {
 }
 
 // POST /api/captain/login
+// Accepts either a phone number or an email address as the identifier (some
+// captains' phone numbers are on file in inconsistent formats — 083..., +27 83...,
+// with/without spaces — while email has no such ambiguity once normalized).
 router.post("/captain/login", async (req, res) => {
   const body = req.body as Record<string, unknown>;
-  const phone = typeof body.phone === "string" ? normalizePhone(body.phone.trim()) : "";
+  const identifierRaw = typeof body.identifier === "string" ? body.identifier.trim()
+    : typeof body.phone === "string" ? body.phone.trim() // back-compat with the old phone-only field
+    : "";
   const pin = typeof body.pin === "string" ? body.pin.trim() : "";
 
-  if (!phone || !pin) {
-    res.status(400).json({ error: "Phone and PIN are required" });
+  if (!identifierRaw || !pin) {
+    res.status(400).json({ error: "Phone number or email, and PIN, are required" });
     return;
   }
   if (!/^\d{4}$/.test(pin)) {
@@ -160,15 +165,24 @@ router.post("/captain/login", async (req, res) => {
     return;
   }
 
+  const normalizedPhone = normalizePhone(identifierRaw);
+  const normalizedEmail = identifierRaw.toLowerCase();
+
   try {
     const profiles = await db.select().from(captainProfilesTable);
-    const profile = profiles.find(p => p.phone && normalizePhone(p.phone) === phone);
+    // Match on phone OR email. Multiple profiles can share the same phone/email
+    // (e.g. a captain's display name changed and a new profile got created
+    // alongside the old one) — try the PIN against every matching candidate
+    // rather than just the first row a plain .find() would happen to hit, so a
+    // captain's real, current PIN always works even if a stale duplicate exists.
+    const candidates = profiles.filter(p =>
+      (p.phone && normalizePhone(p.phone) === normalizedPhone) ||
+      (p.email && p.email.trim().toLowerCase() === normalizedEmail),
+    );
+    const pinHash = hashPin(pin);
+    const profile = candidates.find(p => p.pinHash && p.pinHash === pinHash);
 
-    if (!profile || !profile.pinHash) {
-      res.status(401).json({ error: "Invalid phone number or PIN" });
-      return;
-    }
-    if (profile.pinHash !== hashPin(pin)) {
+    if (!profile) {
       res.status(401).json({ error: "Invalid phone number or PIN" });
       return;
     }
@@ -537,9 +551,10 @@ router.post("/captain/management/profiles", async (req, res) => {
   const body = req.body as Record<string, unknown>;
   const name = typeof body.name === "string" ? body.name.trim() : "";
   const phone = typeof body.phone === "string" ? normalizePhone(body.phone.trim()) : "";
+  const email = typeof body.email === "string" ? body.email.trim().toLowerCase() : "";
   if (!name) { res.status(400).json({ error: "Name is required" }); return; }
   try {
-    const [created] = await db.insert(captainProfilesTable).values({ name, phone: phone || null }).returning();
+    const [created] = await db.insert(captainProfilesTable).values({ name, phone: phone || null, email: email || null }).returning();
     res.status(201).json(created);
   } catch (err) {
     req.log.error(err);
@@ -560,6 +575,10 @@ router.put("/captain/management/:id", async (req, res) => {
   if (typeof body.phone === "string") {
     const p = normalizePhone(body.phone.trim());
     patch.phone = p || null;
+  }
+  if (typeof body.email === "string") {
+    const e = body.email.trim().toLowerCase();
+    patch.email = e || null;
   }
   if (typeof body.pin === "string") {
     const pin = body.pin.trim();

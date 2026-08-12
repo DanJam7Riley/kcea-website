@@ -84,6 +84,7 @@ export const captainProfilesTable = pgTable("captain_profiles", {
   id: serial("id").primaryKey(),
   name: text("name").notNull(),
   phone: text("phone"),
+  email: text("email"),
   pin: text("pin"),
   pinHash: text("pin_hash"),
   lastLoginAt: timestamp("last_login_at"),

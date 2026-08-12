@@ -176,7 +176,7 @@ function PropertyNoteField({
 
 export default function CaptainPortal() {
   const [token, setToken] = useState(() => localStorage.getItem("kcea_captain_token") ?? "");
-  const [phone, setPhone] = useState("");
+  const [identifier, setIdentifier] = useState("");
   const [pin, setPin] = useState("");
   const [loginError, setLoginError] = useState("");
   const [loginLoading, setLoginLoading] = useState(false);
@@ -262,7 +262,7 @@ export default function CaptainPortal() {
       const res = await fetch(`${BASE}/api/captain/login`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ phone: phone.replace(/\s/g, ""), pin }),
+        body: JSON.stringify({ identifier: identifier.trim(), pin }),
       });
       const data = await res.json() as { token?: string; error?: string };
       if (!res.ok) {
@@ -380,7 +380,7 @@ export default function CaptainPortal() {
               </div>
               <CardTitle className="text-2xl">Captain Portal</CardTitle>
               <p className="text-muted-foreground text-sm mt-1">
-                Sign in with your registered phone number and PIN
+                Sign in with your registered phone number or email, and PIN
               </p>
             </CardHeader>
             <CardContent>
@@ -388,13 +388,13 @@ export default function CaptainPortal() {
                 <>
                   <form onSubmit={handleLogin} className="space-y-4">
                     <div className="space-y-2">
-                      <Label htmlFor="phone">Phone Number</Label>
+                      <Label htmlFor="identifier">Phone Number or Email</Label>
                       <Input
-                        id="phone"
-                        type="tel"
-                        placeholder="+27 82 123 4567"
-                        value={phone}
-                        onChange={e => setPhone(e.target.value)}
+                        id="identifier"
+                        type="text"
+                        placeholder="082 123 4567 or you@example.com"
+                        value={identifier}
+                        onChange={e => setIdentifier(e.target.value)}
                         required
                         className="bg-background border-border"
                       />
