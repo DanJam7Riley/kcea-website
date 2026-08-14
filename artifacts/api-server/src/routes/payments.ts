@@ -147,24 +147,37 @@ function parseCsv(text: string): string[][] {
 // Column detection is intentionally loose — bank export formats vary. Looks
 // for a header row containing recognisable column names; if none is found,
 // assumes date/description/amount are the first three columns. Verify
-// against a real FNB export before relying on this in production — flagged
-// in the PR description.
+// against a real FNB export (confirmed 2026-08-14): FNB's export has two
+// title lines before the real header row —
+//   ACCOUNT TRANSACTION HISTORY
+//   FOR ACCOUNT NUMBER 63213323693
+//   Date,SERVICE FEE,Amount,DESCRIPTION,REFERENCE,Balance,CHEQUE NUMBER,
+// — so the header row isn't necessarily row 0. Scan the first few rows for
+// one that looks like a real header instead of assuming row 0 is it.
 function detectColumns(rows: string[][]): { dateIdx: number; descIdx: number; amountIdx: number; startRow: number } {
   const headerCandidates = ["date", "description", "amount", "money in", "credit", "deposit", "narrative"];
-  const first = rows[0]?.map(c => c.trim().toLowerCase()) ?? [];
-  const looksLikeHeader = first.some(c => headerCandidates.some(h => c.includes(h)));
-  if (!looksLikeHeader) {
-    return { dateIdx: 0, descIdx: 1, amountIdx: 2, startRow: 0 };
+  const SCAN_ROWS = 5;
+  for (let i = 0; i < Math.min(SCAN_ROWS, rows.length); i++) {
+    const cells = rows[i].map(c => c.trim().toLowerCase());
+    const matches = cells.filter(c => headerCandidates.some(h => c.includes(h))).length;
+    // Require at least 2 recognisable header cells (e.g. "date" + "amount")
+    // so a coincidental single match in a title/preamble line doesn't get
+    // mistaken for the real header row.
+    if (matches >= 2) {
+      const dateIdx = cells.findIndex(c => c.includes("date"));
+      const descIdx = cells.findIndex(c => c.includes("description") || c.includes("narrative") || c.includes("detail"));
+      const amountIdx = cells.findIndex(c => c.includes("amount") || c.includes("money in") || c.includes("credit") || c.includes("deposit"));
+      return {
+        dateIdx: dateIdx >= 0 ? dateIdx : 0,
+        descIdx: descIdx >= 0 ? descIdx : 1,
+        amountIdx: amountIdx >= 0 ? amountIdx : 2,
+        startRow: i + 1,
+      };
+    }
   }
-  const dateIdx = first.findIndex(c => c.includes("date"));
-  const descIdx = first.findIndex(c => c.includes("description") || c.includes("narrative") || c.includes("detail"));
-  const amountIdx = first.findIndex(c => c.includes("amount") || c.includes("money in") || c.includes("credit") || c.includes("deposit"));
-  return {
-    dateIdx: dateIdx >= 0 ? dateIdx : 0,
-    descIdx: descIdx >= 0 ? descIdx : 1,
-    amountIdx: amountIdx >= 0 ? amountIdx : 2,
-    startRow: 1,
-  };
+  // No recognisable header found in the first few rows — assume there's no
+  // header at all and data starts at row 0 in date/description/amount order.
+  return { dateIdx: 0, descIdx: 1, amountIdx: 2, startRow: 0 };
 }
 
 function parseAmount(raw: string | undefined): number | null {
@@ -186,6 +199,20 @@ interface MatchCandidate {
   balanceDue: number | null;
 }
 
+// Bank descriptions abbreviate street names — confirmed 2026-08-14 against a
+// real FNB export: a commitment stored as "Highland Road" shows up in the
+// bank description as just "244HIGHLAND" (no "Road", no space before the
+// number). Strip the common street-type suffix word before matching so the
+// core name ("highland") is what's actually searched for.
+const STREET_SUFFIXES = ["road", "street", "rd", "st", "drive", "dr", "avenue", "ave", "close", "court", "lane", "crescent"];
+function coreStreetName(street: string): string {
+  const words = street.toLowerCase().trim().split(/\s+/);
+  while (words.length > 1 && STREET_SUFFIXES.includes(words[words.length - 1])) {
+    words.pop();
+  }
+  return words.join(" ");
+}
+
 function findMatch(
   description: string,
   commitments: { id: number; fullName: string; street: string; houseNumber: string }[],
@@ -194,7 +221,7 @@ function findMatch(
   let best: { id: number; fullName: string; street: string; houseNumber: string } | null = null;
   let bestLen = 0;
   for (const c of commitments) {
-    const street = c.street.toLowerCase().trim();
+    const street = coreStreetName(c.street);
     const house = c.houseNumber.toLowerCase().trim();
     if (!street || !house) continue;
     const houseWordMatch = new RegExp(`(^|[^0-9])${house.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}([^0-9]|$)`).test(desc);
