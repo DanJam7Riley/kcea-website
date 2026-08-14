@@ -58,6 +58,19 @@ interface InvoiceRow {
   createdAt: string;
   lineItems?: InvoiceLineItem[];
   amountPaid?: number;
+  payments?: PaymentRow[];
+}
+
+interface PaymentRow {
+  id: number;
+  invoiceId: number;
+  amount: number;
+  paymentDate: string;
+  method: string;
+  reference: string | null;
+  notes: string | null;
+  source: string;
+  recordedBy: string | null;
 }
 
 interface IncompleteCommitment {
@@ -543,6 +556,18 @@ export default function Admin() {
       setShowRecordPayment(false);
       setRecordPaymentInvoice(null);
     },
+  });
+
+  // Undo a recorded payment — e.g. a mistaken test entry, or a genuine
+  // correction. Server recomputes the invoice's status automatically
+  // (paid/partial reverts back towards unpaid as appropriate).
+  const deletePayment = useMutation({
+    mutationFn: (id: number) =>
+      fetch(`${BASE}/api/payments/${id}`, { method: "DELETE", headers: authHeaders }).then(async r => {
+        if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error ?? "Failed to undo payment");
+        return r.json();
+      }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["invoices"] }),
   });
 
   // ── Multi-month invoice ──────────────────────────────────────────
@@ -2921,6 +2946,31 @@ export default function Admin() {
                             )}
                             {inv.createdBy && <span>By {inv.createdBy}</span>}
                           </div>
+                          {!!inv.payments?.length && (
+                            <div className="space-y-1 pt-1">
+                              {inv.payments.map(p => (
+                                <div key={p.id} className="flex items-center gap-2 text-xs text-muted-foreground">
+                                  <span>
+                                    R{p.amount.toLocaleString("en-ZA")} · {p.method} · {new Date(p.paymentDate).toLocaleDateString("en-ZA")}
+                                    {p.reference ? ` · ${p.reference}` : ""}
+                                  </span>
+                                  <button
+                                    type="button"
+                                    className="text-red-400 hover:underline disabled:opacity-50"
+                                    disabled={deletePayment.isPending}
+                                    onClick={() => {
+                                      if (window.confirm(`Undo this R${p.amount.toLocaleString("en-ZA")} payment?`)) {
+                                        deletePayment.mutate(p.id);
+                                      }
+                                    }}
+                                    data-testid={`undo-payment-${p.id}`}
+                                  >
+                                    Undo
+                                  </button>
+                                </div>
+                              ))}
+                            </div>
+                          )}
                         </div>
                         <div className="flex gap-2 shrink-0 items-center flex-wrap">
                           {inv.status === "paid" || inv.status === "partial" ? (

@@ -100,14 +100,21 @@ router.get("/invoices", async (req, res) => {
       );
     }
 
-    // amountPaid per invoice, so the list view can show balances without a
-    // separate fetch per row. Fetched in one query and aggregated in JS —
-    // simpler than a SQL join here and fine at KCEA's invoice volume.
-    const allPayments = await db.select({ invoiceId: paymentsTable.invoiceId, amount: paymentsTable.amount }).from(paymentsTable);
+    // amountPaid + the payment rows themselves per invoice, so the list view
+    // can show balances and offer an "Undo" per payment without a separate
+    // fetch per row. Fetched in one query and aggregated in JS — simpler
+    // than a SQL join here and fine at KCEA's invoice volume.
+    const allPayments = await db.select().from(paymentsTable).orderBy(desc(paymentsTable.paymentDate));
     const paidByInvoice = new Map<number, number>();
-    for (const p of allPayments) paidByInvoice.set(p.invoiceId, (paidByInvoice.get(p.invoiceId) ?? 0) + p.amount);
+    const paymentsByInvoice = new Map<number, typeof allPayments>();
+    for (const p of allPayments) {
+      paidByInvoice.set(p.invoiceId, (paidByInvoice.get(p.invoiceId) ?? 0) + p.amount);
+      const list = paymentsByInvoice.get(p.invoiceId) ?? [];
+      list.push(p);
+      paymentsByInvoice.set(p.invoiceId, list);
+    }
 
-    res.json(rows.map(r => ({ ...r, amountPaid: paidByInvoice.get(r.id) ?? 0 })));
+    res.json(rows.map(r => ({ ...r, amountPaid: paidByInvoice.get(r.id) ?? 0, payments: paymentsByInvoice.get(r.id) ?? [] })));
   } catch (err) {
     req.log.error(err);
     res.status(500).json({ error: "Failed to fetch invoices" });
