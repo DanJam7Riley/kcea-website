@@ -11,6 +11,7 @@ import Update from "@/pages/Update";
 import MeUpdate from "@/pages/MeUpdate";
 import Pledge from "@/pages/Pledge";
 import Confirm from "@/pages/Confirm";
+import Statement from "@/pages/Statement";
 
 const queryClient = new QueryClient();
 
@@ -26,6 +27,7 @@ function Router() {
       <Route path="/me/update" component={MeUpdate} />
       <Route path="/pledge" component={Pledge} />
       <Route path="/confirm" component={Confirm} />
+      <Route path="/statement" component={Statement} />
       <Route component={NotFound} />
     </Switch>
   );
