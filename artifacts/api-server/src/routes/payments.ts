@@ -189,6 +189,16 @@ function parseAmount(raw: string | undefined): number | null {
   return Math.round(n);
 }
 
+// Key for spotting a likely-duplicate payment: same invoice, same amount,
+// same calendar day. Re-importing a statement whose date range overlaps a
+// previous import (e.g. downloading "from the start" after already having
+// imported the last few weeks) would otherwise create a second payment row
+// for every transaction already recorded.
+function duplicateKey(invoiceId: number, amount: number, date: Date): string {
+  const day = date.toISOString().slice(0, 10);
+  return `${invoiceId}|${amount}|${day}`;
+}
+
 interface MatchCandidate {
   commitmentId: number;
   fullName: string;
@@ -197,6 +207,7 @@ interface MatchCandidate {
   invoiceId: number | null;
   invoiceNumber: string | null;
   balanceDue: number | null;
+  possibleDuplicate: boolean;
 }
 
 // Bank descriptions abbreviate street names — confirmed 2026-08-14 against a
@@ -285,6 +296,12 @@ router.post("/payments/import-preview", async (req, res) => {
     // creation order given invoices are never renumbered).
     for (const list of openInvoicesByCommitment.values()) list.sort((a, b) => a.id - b.id);
 
+    // Existing payments, for duplicate detection (see duplicateKey above) —
+    // covers every invoice, not just currently-open ones, since a payment
+    // already recorded may have since moved that invoice to "paid".
+    const existingPayments = await db.select({ invoiceId: paymentsTable.invoiceId, amount: paymentsTable.amount, paymentDate: paymentsTable.paymentDate }).from(paymentsTable);
+    const existingKeys = new Set(existingPayments.map(p => duplicateKey(p.invoiceId, p.amount, new Date(p.paymentDate))));
+
     const matched: (ParsedRow & { candidate: MatchCandidate })[] = [];
     const needsReview: ParsedRow[] = [];
 
@@ -295,6 +312,11 @@ router.post("/payments/import-preview", async (req, res) => {
         continue;
       }
       const openInvoice = openInvoicesByCommitment.get(match.id)?.[0] ?? null;
+      const rowDate = row.date ? new Date(row.date) : new Date();
+      const possibleDuplicate =
+        openInvoice !== null && row.amount !== null && !isNaN(rowDate.getTime())
+          ? existingKeys.has(duplicateKey(openInvoice.id, row.amount, rowDate))
+          : false;
       matched.push({
         ...row,
         candidate: {
@@ -305,6 +327,7 @@ router.post("/payments/import-preview", async (req, res) => {
           invoiceId: openInvoice?.id ?? null,
           invoiceNumber: openInvoice?.invoiceNumber ?? null,
           balanceDue: openInvoice?.balanceDue ?? null,
+          possibleDuplicate,
         },
       });
     }
@@ -358,6 +381,28 @@ router.post("/payments/import-confirm", async (req, res) => {
       }
       const paymentDate = typeof r.date === "string" && r.date ? new Date(r.date) : new Date();
       const reference = typeof r.description === "string" ? r.description.slice(0, 500) : null;
+
+      // Final duplicate guard — belt-and-suspenders against the preview's
+      // possibleDuplicate flag, in case rows were confirmed without the
+      // frontend re-checking (e.g. an older cached preview). Re-importing a
+      // statement whose date range overlaps a previous import must not
+      // double-record the same real-world payment.
+      if (!isNaN(paymentDate.getTime())) {
+        const existing = await db
+          .select({ id: paymentsTable.id })
+          .from(paymentsTable)
+          .where(
+            and(
+              eq(paymentsTable.invoiceId, invoiceId),
+              eq(paymentsTable.amount, amount),
+              sql`date_trunc('day', ${paymentsTable.paymentDate}) = date_trunc('day', ${paymentDate}::timestamp)`,
+            ),
+          );
+        if (existing.length > 0) {
+          skipped.push({ row: r, reason: "Likely duplicate — a payment for this invoice/amount/date already exists" });
+          continue;
+        }
+      }
 
       const [payment] = await db
         .insert(paymentsTable)
