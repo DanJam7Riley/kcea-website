@@ -27,6 +27,22 @@ interface CommittedProperty {
   phone: string;
   email: string;
   submittedAt: string;
+  // Derived from invoices/payments — see /api/captain/dashboard.
+  paymentStatus?: "paid" | "partial" | "unpaid" | "no invoices";
+  lastPaymentDate?: string | null;
+}
+
+function paymentStatusBadge(status: CommittedProperty["paymentStatus"]) {
+  if (!status || status === "no invoices") {
+    return <Badge variant="outline" className="bg-muted/40 text-muted-foreground border-border text-xs">Not invoiced</Badge>;
+  }
+  if (status === "paid") {
+    return <Badge variant="outline" className="bg-green-500/20 text-green-400 border-green-500/20 text-xs">Paid up</Badge>;
+  }
+  if (status === "partial") {
+    return <Badge variant="outline" className="bg-amber-500/20 text-amber-400 border-amber-500/20 text-xs">Partial</Badge>;
+  }
+  return <Badge variant="outline" className="bg-red-500/20 text-red-400 border-red-500/20 text-xs">Unpaid</Badge>;
 }
 
 function ContactDetails({ fullName, street, houseNumber, phone, email, submittedAt }: {
@@ -712,8 +728,16 @@ export default function CaptainPortal() {
                             Paid ✓
                           </Badge>
                         )}
+                        {paymentStatusBadge(c.paymentStatus)}
                       </div>
                     </div>
+                    <p className="text-[11px] text-muted-foreground mt-1">
+                      {c.lastPaymentDate
+                        ? `Last payment: ${new Date(c.lastPaymentDate).toLocaleDateString("en-ZA", { day: "2-digit", month: "short", year: "numeric" })}`
+                        : c.paymentStatus === "no invoices"
+                          ? "No invoices yet"
+                          : "No payments recorded yet"}
+                    </p>
                     {expandedDetails.has(`committed:${c.id}`) && (
                       <ContactDetails
                         fullName={c.fullName}

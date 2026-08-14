@@ -12,6 +12,8 @@ import adminMigrateRouter from "./admin-migrate";
 import meUpdateRouter from "./me-update";
 import invoicesRouter from "./invoices";
 import legacyConfirmRouter from "./legacy-confirm";
+import paymentsRouter from "./payments";
+import statementRouter from "./statement";
 
 const router: IRouter = Router();
 
@@ -26,6 +28,8 @@ router.use(meUpdateRouter);
 router.use(pledgesRouter);
 router.use(invoicesRouter);
 router.use(legacyConfirmRouter);
+router.use(paymentsRouter);
+router.use(statementRouter);
 router.use(volunteersRouter);
 router.use(captainPortalRouter);
 

@@ -196,12 +196,18 @@ export const invoicesTable = pgTable("invoices", {
   billToEmail: text("bill_to_email"),
   invoiceDate: timestamp("invoice_date").notNull().defaultNow(),
   dueDate: timestamp("due_date").notNull(),
-  status: text("status").notNull().default("unpaid"), // draft | unpaid | paid | overdue | cancelled
+  status: text("status").notNull().default("unpaid"), // draft | unpaid | partial | paid | overdue | cancelled
   subtotal: integer("subtotal").notNull().default(0),
   total: integer("total").notNull().default(0),
   notes: text("notes"),
   createdBy: text("created_by"),
   emailSentAt: timestamp("email_sent_at"),
+  // How many calendar months this invoice covers, starting at invoiceDate's
+  // month (added for multi-month invoices, e.g. a resident paying 6 months
+  // up front in one invoice). Defaults to 1 for every existing/normal invoice.
+  // bulk-generate's "already invoiced this month" check honours this so a
+  // multi-month invoice can't be double-billed by the normal monthly run.
+  coversMonths: integer("covers_months").notNull().default(1),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
@@ -218,3 +224,26 @@ export const invoiceLineItemsTable = pgTable("invoice_line_items", {
   amount: integer("amount").notNull(),
 });
 export type InvoiceLineItem = typeof invoiceLineItemsTable.$inferSelect;
+
+// ── Payments ───────────────────────────────────────────────────
+// One row per recorded payment against an invoice. An invoice's status is
+// derived from the sum of its payments vs its total (see invoices.ts):
+// unpaid (0 paid) → partial (0 < paid < total) → paid (paid >= total).
+// "source" distinguishes a payment typed in by hand from one created by
+// confirming a matched row in a bank-statement CSV import, for audit
+// purposes — both write identical rows otherwise.
+export const paymentsTable = pgTable("payments", {
+  id: serial("id").primaryKey(),
+  invoiceId: integer("invoice_id")
+    .notNull()
+    .references(() => invoicesTable.id, { onDelete: "cascade" }),
+  amount: integer("amount").notNull(),
+  paymentDate: timestamp("payment_date").notNull().defaultNow(),
+  method: text("method").notNull().default("EFT"),
+  reference: text("reference"),
+  notes: text("notes"),
+  source: text("source").notNull().default("manual"), // manual | bank_import
+  recordedBy: text("recorded_by"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+export type Payment = typeof paymentsTable.$inferSelect;

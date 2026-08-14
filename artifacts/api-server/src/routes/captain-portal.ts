@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { createHmac, randomBytes, timingSafeEqual } from "crypto";
-import { db, captainProfilesTable, captainTokensTable, streetCaptainsTable, commitmentsTable, propertyNotesTable, streetHousesTable, captainResidentContactsTable } from "@workspace/db";
-import { eq, and, inArray, gt, desc } from "drizzle-orm";
+import { db, captainProfilesTable, captainTokensTable, streetCaptainsTable, commitmentsTable, propertyNotesTable, streetHousesTable, captainResidentContactsTable, invoicesTable, paymentsTable } from "@workspace/db";
+import { eq, and, inArray, gt, desc, sql } from "drizzle-orm";
 import { sendEmail } from "../lib/email";
 
 const router = Router();
@@ -344,6 +344,73 @@ router.get("/captain/dashboard", async (req, res) => {
         .where(inArray(propertyNotesTable.street, streets));
     }
 
+    // Payment visibility for captains — Janine's request: captains need to see
+    // when a household on their street last paid so they know who to follow up
+    // with, without needing invoice-level admin access. Computed across every
+    // (non-cancelled) invoice for each committed household: "paid" if nothing
+    // is outstanding, "partial" if some but not all is paid, "unpaid" if
+    // nothing has been paid at all, "no invoices" if none exist yet.
+    const paymentStatusByCommitment: Record<
+      number,
+      { lastPaymentDate: Date | null; status: "paid" | "partial" | "unpaid" | "no invoices" }
+    > = {};
+    if (committed.length > 0) {
+      const commitmentIds = committed.map(c => c.id);
+      const invoiceRows = await db
+        .select({ id: invoicesTable.id, commitmentId: invoicesTable.commitmentId, total: invoicesTable.total })
+        .from(invoicesTable)
+        .where(and(inArray(invoicesTable.commitmentId, commitmentIds), sql`${invoicesTable.status} != 'cancelled'`));
+
+      const invoiceIds = invoiceRows.map(r => r.id);
+      const paymentRows =
+        invoiceIds.length > 0
+          ? await db
+              .select({ invoiceId: paymentsTable.invoiceId, amount: paymentsTable.amount, paymentDate: paymentsTable.paymentDate })
+              .from(paymentsTable)
+              .where(inArray(paymentsTable.invoiceId, invoiceIds))
+          : [];
+
+      const paidByInvoice = new Map<number, number>();
+      const lastPaymentByInvoice = new Map<number, Date>();
+      for (const p of paymentRows) {
+        paidByInvoice.set(p.invoiceId, (paidByInvoice.get(p.invoiceId) ?? 0) + p.amount);
+        const existing = lastPaymentByInvoice.get(p.invoiceId);
+        if (!existing || new Date(p.paymentDate) > existing) lastPaymentByInvoice.set(p.invoiceId, new Date(p.paymentDate));
+      }
+
+      const invoicesByCommitment = new Map<number, typeof invoiceRows>();
+      for (const inv of invoiceRows) {
+        if (inv.commitmentId === null) continue;
+        const list = invoicesByCommitment.get(inv.commitmentId) ?? [];
+        list.push(inv);
+        invoicesByCommitment.set(inv.commitmentId, list);
+      }
+
+      for (const c of committed) {
+        const invs = invoicesByCommitment.get(c.id) ?? [];
+        if (invs.length === 0) {
+          paymentStatusByCommitment[c.id] = { lastPaymentDate: null, status: "no invoices" };
+          continue;
+        }
+        let totalDue = 0;
+        let totalPaid = 0;
+        let lastPaymentDate: Date | null = null;
+        for (const inv of invs) {
+          totalDue += inv.total;
+          totalPaid += paidByInvoice.get(inv.id) ?? 0;
+          const last = lastPaymentByInvoice.get(inv.id);
+          if (last && (!lastPaymentDate || last > lastPaymentDate)) lastPaymentDate = last;
+        }
+        const status = totalPaid <= 0 ? "unpaid" : totalPaid >= totalDue ? "paid" : "partial";
+        paymentStatusByCommitment[c.id] = { lastPaymentDate, status };
+      }
+    }
+    const committedWithPaymentStatus = committed.map(c => ({
+      ...c,
+      paymentStatus: paymentStatusByCommitment[c.id]?.status ?? "no invoices",
+      lastPaymentDate: paymentStatusByCommitment[c.id]?.lastPaymentDate ?? null,
+    }));
+
     const committedKeys = new Set(committed.map(c => `${c.street}|${c.houseNumber}`));
     const notCommitted = houses.filter(h => !committedKeys.has(`${h.street}|${h.houseNumber}`));
 
@@ -376,7 +443,7 @@ router.get("/captain/dashboard", async (req, res) => {
     res.json({
       captainName: profile.name,
       streets,
-      committed,
+      committed: committedWithPaymentStatus,
       notCommitted,
       notes,
       newSubmissions,

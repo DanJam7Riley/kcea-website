@@ -1,11 +1,47 @@
 import { Router } from "express";
-import { db, invoicesTable, invoiceLineItemsTable, commitmentsTable } from "@workspace/db";
+import { db, invoicesTable, invoiceLineItemsTable, commitmentsTable, paymentsTable } from "@workspace/db";
 import { eq, desc, sql, and, isNull } from "drizzle-orm";
 import { isAdminReq, adminRoleFromHeaders, PRIMARY_USERNAME, SECONDARY_USERNAME } from "../lib/admin-auth";
 import { sendEmail } from "../lib/email";
 import { buildInvoicePdf } from "../lib/invoice-pdf";
+import { makeStatementToken } from "./statement";
+
+const SITE_URL = process.env.PUBLIC_SITE_URL ?? "https://www.kcea.co.za";
+
+// Link to a resident's self-service statement (invoice history + payments +
+// running balance) — included in every invoice email so residents can check
+// what they owe/have paid themselves instead of asking KCEA to resend
+// something. No-op (empty string) if the invoice has no linked commitment
+// (e.g. a manually created one-off invoice with no commitmentId).
+function statementLink(commitmentId: number | null): string {
+  if (!commitmentId) return "";
+  return `${SITE_URL}/statement?id=${commitmentId}&t=${makeStatementToken(commitmentId)}`;
+}
 
 const router = Router();
+
+// Derived status, per the 2026-07-31 decision: "paid" is never set by hand —
+// it (and "partial") come purely from the sum of recorded payments vs total.
+// "draft" and "cancelled" stay fully admin-controlled (a cancelled invoice
+// with a payment recorded against it is an edge case for a human to resolve,
+// not something this function should silently override).
+export function deriveInvoiceStatus(currentStatus: string, totalPaid: number, total: number): string {
+  if (currentStatus === "draft" || currentStatus === "cancelled") return currentStatus;
+  if (totalPaid <= 0) return "unpaid";
+  if (totalPaid >= total) return "paid";
+  return "partial";
+}
+
+export async function recomputeInvoiceStatus(invoiceId: number): Promise<void> {
+  const [invoice] = await db.select().from(invoicesTable).where(eq(invoicesTable.id, invoiceId));
+  if (!invoice) return;
+  const payments = await db.select().from(paymentsTable).where(eq(paymentsTable.invoiceId, invoiceId));
+  const totalPaid = payments.reduce((s, p) => s + p.amount, 0);
+  const status = deriveInvoiceStatus(invoice.status, totalPaid, invoice.total);
+  if (status !== invoice.status) {
+    await db.update(invoicesTable).set({ status, updatedAt: new Date() }).where(eq(invoicesTable.id, invoiceId));
+  }
+}
 
 // Digital sign-off: record which admin login created/actioned the invoice.
 // No physical signature field — matches KCEA's own instruction that this is a
@@ -63,7 +99,15 @@ router.get("/invoices", async (req, res) => {
           (r.billToHouseNumber ?? "").toLowerCase().includes(q),
       );
     }
-    res.json(rows);
+
+    // amountPaid per invoice, so the list view can show balances without a
+    // separate fetch per row. Fetched in one query and aggregated in JS —
+    // simpler than a SQL join here and fine at KCEA's invoice volume.
+    const allPayments = await db.select({ invoiceId: paymentsTable.invoiceId, amount: paymentsTable.amount }).from(paymentsTable);
+    const paidByInvoice = new Map<number, number>();
+    for (const p of allPayments) paidByInvoice.set(p.invoiceId, (paidByInvoice.get(p.invoiceId) ?? 0) + p.amount);
+
+    res.json(rows.map(r => ({ ...r, amountPaid: paidByInvoice.get(r.id) ?? 0 })));
   } catch (err) {
     req.log.error(err);
     res.status(500).json({ error: "Failed to fetch invoices" });
@@ -108,6 +152,17 @@ function invoiceDateForMonth(range: { start: Date; isCurrent: boolean }): Date {
   return range.isCurrent ? new Date() : range.start;
 }
 
+// True if an existing invoice (dated invoiceDate, covering coversMonths
+// calendar months starting at invoiceDate's month) already covers the target
+// month range [rangeStart, rangeEnd). Used so a multi-month invoice (e.g. 6
+// months paid up front in one go) correctly blocks the normal monthly
+// bulk-generate run from also billing those same months.
+function invoiceCoversRange(invoiceDate: Date, coversMonths: number, rangeStart: Date, rangeEnd: Date): boolean {
+  const coverStart = new Date(invoiceDate.getFullYear(), invoiceDate.getMonth(), 1);
+  const coverEnd = new Date(coverStart.getFullYear(), coverStart.getMonth() + Math.max(1, coversMonths), 1);
+  return coverStart < rangeEnd && coverEnd > rangeStart;
+}
+
 // Preview — admin only. Returns every "monthly" commitment that doesn't already
 // have an invoice dated in the target calendar month (defaults to this month;
 // pass ?month=YYYY-MM to catch up a past month), with the rate that would be
@@ -133,13 +188,23 @@ router.get("/invoices/bulk-preview", async (req, res) => {
       .from(commitmentsTable)
       .where(eq(commitmentsTable.commitmentType, "monthly"));
 
-    const alreadyInvoiced = await db
-      .select({ commitmentId: invoicesTable.commitmentId })
+    // Fetch every non-cancelled invoice with a commitmentId and check month
+    // coverage in JS (not just an exact-month SQL match) — a multi-month
+    // invoice (coversMonths > 1) must also block bulk-generate for every
+    // month it covers, not just the month it's dated in.
+    const candidateInvoices = await db
+      .select({
+        commitmentId: invoicesTable.commitmentId,
+        invoiceDate: invoicesTable.invoiceDate,
+        coversMonths: invoicesTable.coversMonths,
+      })
       .from(invoicesTable)
-      .where(
-        sql`${invoicesTable.commitmentId} is not null and ${invoicesTable.invoiceDate} >= ${start} and ${invoicesTable.invoiceDate} < ${end}`,
-      );
-    const invoicedIds = new Set(alreadyInvoiced.map(r => r.commitmentId));
+      .where(and(sql`${invoicesTable.commitmentId} is not null`, sql`${invoicesTable.status} != 'cancelled'`));
+    const invoicedIds = new Set(
+      candidateInvoices
+        .filter(r => invoiceCoversRange(new Date(r.invoiceDate), r.coversMonths, start, end))
+        .map(r => r.commitmentId),
+    );
 
     const eligible = monthly
       .filter(c => !invoicedIds.has(c.id))
@@ -286,6 +351,101 @@ router.post("/invoices/onceoff-generate", async (req, res) => {
   }
 });
 
+// ── Multi-month invoices ──────────────────────────────────────────────────
+// Some residents ask to pay several months in one go (e.g. 6 months up
+// front) rather than being invoiced monthly. This creates ONE invoice with
+// one line item per covered month, dated to start at the given/next month.
+// coversMonths is set on the invoice so bulk-preview/bulk-generate correctly
+// skip this commitment for every month it covers (see invoiceCoversRange
+// above) — the resident won't also get separately billed by the normal
+// monthly run during that window.
+router.post("/invoices/multi-month", async (req, res) => {
+  if (!isAdminReq(req.headers)) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+  const body = req.body as Record<string, unknown>;
+  const commitmentId = typeof body.commitmentId === "number" && Number.isInteger(body.commitmentId) ? body.commitmentId : null;
+  const months = typeof body.months === "number" && Number.isInteger(body.months) ? body.months : 0;
+  if (!commitmentId) {
+    res.status(400).json({ error: "commitmentId is required" });
+    return;
+  }
+  if (months < 2 || months > 24) {
+    res.status(400).json({ error: "months must be between 2 and 24 (use the normal single-month invoice for 1 month)" });
+    return;
+  }
+
+  try {
+    const [commitment] = await db.select().from(commitmentsTable).where(eq(commitmentsTable.id, commitmentId));
+    if (!commitment) {
+      res.status(404).json({ error: "Commitment not found" });
+      return;
+    }
+    if (commitment.commitmentType !== "monthly") {
+      res.status(400).json({ error: "Not a monthly commitment (likely once-off)" });
+      return;
+    }
+
+    const range = resolveMonthRange(body.startMonth);
+    const invoiceDate = invoiceDateForMonth(range);
+
+    // Refuse if any of the target months are already covered by an existing
+    // (non-cancelled) invoice for this commitment — same overlap check used
+    // by bulk-generate, so this can't double-bill either direction.
+    const rangeEnd = new Date(range.start.getFullYear(), range.start.getMonth() + months, 1);
+    const existingForCommitment = await db
+      .select({ invoiceDate: invoicesTable.invoiceDate, coversMonths: invoicesTable.coversMonths })
+      .from(invoicesTable)
+      .where(and(eq(invoicesTable.commitmentId, commitmentId), sql`${invoicesTable.status} != 'cancelled'`));
+    const overlap = existingForCommitment.some(r =>
+      invoiceCoversRange(new Date(r.invoiceDate), r.coversMonths, range.start, rangeEnd),
+    );
+    if (overlap) {
+      res.status(409).json({ error: "One or more of the target months already has an invoice on record for this household" });
+      return;
+    }
+
+    const rate = monthlyRateForStreet(commitment.street);
+    const dueDate = new Date(invoiceDate.getTime() + 15 * 24 * 60 * 60 * 1000);
+    const invoiceNumber = await nextInvoiceNumber();
+    const total = rate * months;
+
+    const [invoice] = await db
+      .insert(invoicesTable)
+      .values({
+        invoiceNumber,
+        commitmentId,
+        billToName: commitment.fullName,
+        billToStreet: commitment.street,
+        billToHouseNumber: commitment.houseNumber,
+        billToEmail: commitment.email,
+        invoiceDate,
+        dueDate,
+        status: "unpaid",
+        subtotal: total,
+        total,
+        notes: `Covers ${months} months of household contributions in one invoice.`,
+        createdBy: createdByFromReq(req.headers as Record<string, unknown>),
+        coversMonths: months,
+      })
+      .returning();
+
+    const lineItems = Array.from({ length: months }, (_, i) => {
+      const monthDate = new Date(range.start.getFullYear(), range.start.getMonth() + i, 1);
+      const label = monthDate.toLocaleDateString("en-ZA", { month: "long", year: "numeric" });
+      return { invoiceId: invoice.id, description: `Monthly household contribution — ${label}`, quantity: 1, unitAmount: rate, amount: rate };
+    });
+    await db.insert(invoiceLineItemsTable).values(lineItems);
+
+    const savedItems = await db.select().from(invoiceLineItemsTable).where(eq(invoiceLineItemsTable.invoiceId, invoice.id));
+    res.status(201).json({ ...invoice, lineItems: savedItems });
+  } catch (err) {
+    req.log.error(err);
+    res.status(500).json({ error: "Failed to generate multi-month invoice" });
+  }
+});
+
 // ── Bulk email: preview + send ──────────────────────────────────
 // Same reason these live here and not lower down: Express matches routes in
 // registration order, and /invoices/:id below would otherwise swallow these
@@ -400,6 +560,9 @@ router.post("/invoices/send-all", async (req, res) => {
         `Branch code: 250655\n` +
         `Reference: ${reference}\n\n` +
         `If you've already paid this, please ignore this email.\n\n` +
+        (statementLink(inv.commitmentId)
+          ? `View your full statement (all invoices, payments, and balance) any time: ${statementLink(inv.commitmentId)}\n\n`
+          : "") +
         `Questions? Contact your street captain, or message KCEA on WhatsApp before paying if anything looks off. ` +
         `We'll never ask for passwords, card numbers, or bank details by email.\n\n` +
         `— KCEA`;
@@ -499,6 +662,9 @@ router.post("/invoices/:id/send-test", async (req, res) => {
       `Branch code: 250655\n` +
       `Reference: ${reference}\n\n` +
       `If you've already paid this, please ignore this email.\n\n` +
+      (statementLink(inv.commitmentId)
+        ? `View your full statement (all invoices, payments, and balance) any time: ${statementLink(inv.commitmentId)}\n\n`
+        : "") +
       `— KCEA`;
 
     // Same resilient pattern as send-all: a PDF failure shouldn't block the
@@ -562,7 +728,13 @@ router.get("/invoices/:id", async (req, res) => {
       .select()
       .from(invoiceLineItemsTable)
       .where(eq(invoiceLineItemsTable.invoiceId, id));
-    res.json({ ...invoice, lineItems });
+    const payments = await db
+      .select()
+      .from(paymentsTable)
+      .where(eq(paymentsTable.invoiceId, id))
+      .orderBy(desc(paymentsTable.paymentDate));
+    const amountPaid = payments.reduce((s, p) => s + p.amount, 0);
+    res.json({ ...invoice, lineItems, payments, amountPaid, balanceDue: Math.max(0, invoice.total - amountPaid) });
   } catch (err) {
     req.log.error(err);
     res.status(500).json({ error: "Failed to fetch invoice" });
@@ -690,13 +862,14 @@ router.post("/invoices/bulk-generate", async (req, res) => {
         skipped.push({ commitmentId, reason: "Not a monthly commitment (likely once-off)" });
         continue;
       }
-      const [existing] = await db
-        .select({ id: invoicesTable.id })
+      const existingForCommitment = await db
+        .select({ invoiceDate: invoicesTable.invoiceDate, coversMonths: invoicesTable.coversMonths })
         .from(invoicesTable)
-        .where(
-          sql`${invoicesTable.commitmentId} = ${commitmentId} and ${invoicesTable.invoiceDate} >= ${range.start} and ${invoicesTable.invoiceDate} < ${range.end}`,
-        );
-      if (existing) {
+        .where(and(eq(invoicesTable.commitmentId, commitmentId), sql`${invoicesTable.status} != 'cancelled'`));
+      const alreadyCovered = existingForCommitment.some(r =>
+        invoiceCoversRange(new Date(r.invoiceDate), r.coversMonths, range.start, range.end),
+      );
+      if (alreadyCovered) {
         skipped.push({ commitmentId, reason: "Already invoiced for that month" });
         continue;
       }
@@ -744,7 +917,11 @@ router.post("/invoices/bulk-generate", async (req, res) => {
   }
 });
 
-// Update status only — admin only. Body: { status: "draft"|"unpaid"|"paid"|"overdue"|"cancelled" }
+// Update status only — admin only. Body: { status: "draft"|"unpaid"|"overdue"|"cancelled" }
+// "paid"/"partial" are NOT settable here as of the payments-tracking feature —
+// per the 2026-07-31 decision, those are derived purely from recorded
+// payments (see recomputeInvoiceStatus above, called from payments.ts).
+// Record a payment to move an invoice to paid/partial instead.
 router.put("/invoices/:id/status", async (req, res) => {
   if (!isAdminReq(req.headers)) {
     res.status(401).json({ error: "Unauthorized" });
@@ -755,11 +932,13 @@ router.put("/invoices/:id/status", async (req, res) => {
     res.status(400).json({ error: "Invalid id" });
     return;
   }
-  const validStatuses = ["draft", "unpaid", "paid", "overdue", "cancelled"];
+  const validStatuses = ["draft", "unpaid", "overdue", "cancelled"];
   const body = req.body as Record<string, unknown>;
   const status = typeof body.status === "string" ? body.status : "";
   if (!validStatuses.includes(status)) {
-    res.status(400).json({ error: `status must be one of: ${validStatuses.join(", ")}` });
+    res.status(400).json({
+      error: `status must be one of: ${validStatuses.join(", ")} (paid/partial are set automatically by recording a payment)`,
+    });
     return;
   }
   try {
@@ -782,7 +961,9 @@ router.put("/invoices/:id/status", async (req, res) => {
 // Delete — admin only. Hard delete (line items cascade via FK). For cleaning up
 // test invoices or bulk-generate mistakes (e.g. a once-off payer that slipped
 // through) — per KCEA's own instruction that removal should mean gone, not
-// just hidden as "cancelled".
+// just hidden as "cancelled". Blocked on any invoice with a payment recorded
+// against it (2026-07-31 decision) — protects the audit trail; delete the
+// payment first (DELETE /payments/:id) if it was genuinely a mistake.
 router.delete("/invoices/:id", async (req, res) => {
   if (!isAdminReq(req.headers)) {
     res.status(401).json({ error: "Unauthorized" });
@@ -794,6 +975,11 @@ router.delete("/invoices/:id", async (req, res) => {
     return;
   }
   try {
+    const [existingPayment] = await db.select({ id: paymentsTable.id }).from(paymentsTable).where(eq(paymentsTable.invoiceId, id));
+    if (existingPayment) {
+      res.status(409).json({ error: "Cannot delete an invoice with a payment recorded against it — delete the payment first." });
+      return;
+    }
     const [deleted] = await db.delete(invoicesTable).where(eq(invoicesTable.id, id)).returning();
     if (!deleted) {
       res.status(404).json({ error: "Not found" });

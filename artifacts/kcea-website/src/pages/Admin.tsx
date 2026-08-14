@@ -57,6 +57,7 @@ interface InvoiceRow {
   emailSentAt: string | null;
   createdAt: string;
   lineItems?: InvoiceLineItem[];
+  amountPaid?: number;
 }
 
 interface IncompleteCommitment {
@@ -491,10 +492,149 @@ export default function Admin() {
   const deleteInvoice = useMutation({
     mutationFn: (id: number) =>
       fetch(`${BASE}/api/invoices/${id}`, { method: "DELETE", headers: authHeaders }).then(async r => {
-        if (!r.ok) throw new Error(await r.text());
+        if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error ?? "Failed to delete invoice");
         return r.json();
       }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["invoices"] }),
+  });
+
+  // ── Record a payment ─────────────────────────────────────────────
+  // "paid"/"partial" are never set by hand — they're derived from recorded
+  // payments (see recomputeInvoiceStatus in invoices.ts). This dialog is the
+  // only way an invoice moves to paid/partial.
+  const [showRecordPayment, setShowRecordPayment] = useState(false);
+  const [recordPaymentInvoice, setRecordPaymentInvoice] = useState<InvoiceRow | null>(null);
+  const [paymentAmount, setPaymentAmount] = useState("");
+  const [paymentDate, setPaymentDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [paymentMethod, setPaymentMethod] = useState("EFT");
+  const [paymentReference, setPaymentReference] = useState("");
+  const [paymentNotes, setPaymentNotes] = useState("");
+
+  function openRecordPayment(inv: InvoiceRow) {
+    setRecordPaymentInvoice(inv);
+    const balance = inv.total - (inv.amountPaid ?? 0);
+    setPaymentAmount(balance > 0 ? String(balance) : "");
+    setPaymentDate(new Date().toISOString().slice(0, 10));
+    setPaymentMethod("EFT");
+    setPaymentReference([inv.billToHouseNumber, inv.billToStreet].filter(Boolean).join(" "));
+    setPaymentNotes("");
+    setShowRecordPayment(true);
+  }
+
+  const recordPayment = useMutation({
+    mutationFn: () =>
+      fetch(`${BASE}/api/payments`, {
+        method: "POST",
+        headers: { ...authHeaders, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          invoiceId: recordPaymentInvoice!.id,
+          amount: Math.round(Number(paymentAmount)),
+          paymentDate: new Date(paymentDate).toISOString(),
+          method: paymentMethod,
+          reference: paymentReference || undefined,
+          notes: paymentNotes || undefined,
+        }),
+      }).then(async r => {
+        if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error ?? "Failed to record payment");
+        return r.json();
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["invoices"] });
+      setShowRecordPayment(false);
+      setRecordPaymentInvoice(null);
+    },
+  });
+
+  // ── Multi-month invoice ──────────────────────────────────────────
+  // For a household paying several months up front in one invoice (e.g. a
+  // resident asking for a 6-month invoice) instead of the normal monthly cycle.
+  const [showMultiMonth, setShowMultiMonth] = useState(false);
+  const [multiMonthCommitmentId, setMultiMonthCommitmentId] = useState("");
+  const [multiMonthCount, setMultiMonthCount] = useState(6);
+
+  const multiMonthGenerate = useMutation({
+    mutationFn: () =>
+      fetch(`${BASE}/api/invoices/multi-month`, {
+        method: "POST",
+        headers: { ...authHeaders, "Content-Type": "application/json" },
+        body: JSON.stringify({ commitmentId: Number(multiMonthCommitmentId), months: multiMonthCount }),
+      }).then(async r => {
+        if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error ?? "Failed to generate multi-month invoice");
+        return r.json();
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["invoices"] });
+      setShowMultiMonth(false);
+      setMultiMonthCommitmentId("");
+      setMultiMonthCount(6);
+    },
+  });
+
+  // ── Bank statement CSV import ─────────────────────────────────────
+  interface BankMatchRow {
+    rowIndex: number;
+    date: string | null;
+    description: string;
+    amount: number | null;
+    candidate: {
+      commitmentId: number;
+      fullName: string;
+      street: string;
+      houseNumber: string;
+      invoiceId: number | null;
+      invoiceNumber: string | null;
+      balanceDue: number | null;
+    };
+  }
+  interface BankImportPreview {
+    totalRows: number;
+    creditRows: number;
+    matchedCount: number;
+    needsReviewCount: number;
+    matched: BankMatchRow[];
+    needsReview: { rowIndex: number; date: string | null; description: string; amount: number | null }[];
+  }
+  const [showBankImport, setShowBankImport] = useState(false);
+  const [bankImportCsvText, setBankImportCsvText] = useState("");
+  const [bankImportPreview, setBankImportPreview] = useState<BankImportPreview | null>(null);
+  const [bankImportExcluded, setBankImportExcluded] = useState<Set<number>>(new Set());
+  const [bankImportResult, setBankImportResult] = useState<{ createdCount: number; skippedCount: number } | null>(null);
+
+  const bankImportPreviewMutation = useMutation({
+    mutationFn: () =>
+      fetch(`${BASE}/api/payments/import-preview`, {
+        method: "POST",
+        headers: { ...authHeaders, "Content-Type": "application/json" },
+        body: JSON.stringify({ csv: bankImportCsvText }),
+      }).then(async r => {
+        if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error ?? "Failed to parse statement");
+        return r.json() as Promise<BankImportPreview>;
+      }),
+    onSuccess: data => {
+      setBankImportPreview(data);
+      setBankImportExcluded(new Set());
+      setBankImportResult(null);
+    },
+  });
+
+  const bankImportConfirmMutation = useMutation({
+    mutationFn: () => {
+      const rows = (bankImportPreview?.matched ?? [])
+        .filter(r => r.candidate.invoiceId && !bankImportExcluded.has(r.rowIndex))
+        .map(r => ({ invoiceId: r.candidate.invoiceId, amount: r.amount, date: r.date ?? undefined, description: r.description }));
+      return fetch(`${BASE}/api/payments/import-confirm`, {
+        method: "POST",
+        headers: { ...authHeaders, "Content-Type": "application/json" },
+        body: JSON.stringify({ rows }),
+      }).then(async r => {
+        if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error ?? "Failed to confirm import");
+        return r.json();
+      });
+    },
+    onSuccess: data => {
+      qc.invalidateQueries({ queryKey: ["invoices"] });
+      setBankImportResult(data);
+    },
   });
 
   // ── Bulk invoice generation ──────────────────────────────────────
@@ -2689,15 +2829,23 @@ export default function Admin() {
                 <CardTitle className="text-xl flex items-center gap-2"><FileText className="h-5 w-5 text-primary" /> Invoices</CardTitle>
                 <p className="text-xs text-muted-foreground mt-1">
                   {invoices.length} invoice{invoices.length === 1 ? "" : "s"}
-                  {" · "}Outstanding: <span className="font-bold text-primary">R{invoices.filter(i => i.status === "unpaid" || i.status === "overdue").reduce((s, i) => s + i.total, 0).toLocaleString("en-ZA")}</span>
+                  {" · "}Outstanding: <span className="font-bold text-primary">
+                    R{invoices.filter(i => i.status !== "cancelled" && i.status !== "draft").reduce((s, i) => s + Math.max(0, i.total - (i.amountPaid ?? 0)), 0).toLocaleString("en-ZA")}
+                  </span>
                 </p>
               </div>
-              <div className="flex gap-2">
+              <div className="flex gap-2 flex-wrap">
                 <Button size="sm" variant="outline" className="gap-1.5" onClick={openBulkInvoiceDialog} data-testid="bulk-invoice-button">
                   <FileText className="h-4 w-4" /> Generate monthly invoices
                 </Button>
                 <Button size="sm" variant="outline" className="gap-1.5" onClick={openOnceoffInvoiceDialog} data-testid="onceoff-invoice-button">
                   <FileText className="h-4 w-4" /> Invoice once-off signups
+                </Button>
+                <Button size="sm" variant="outline" className="gap-1.5" onClick={() => setShowMultiMonth(true)} data-testid="multi-month-invoice-button">
+                  <FileText className="h-4 w-4" /> Multi-month invoice
+                </Button>
+                <Button size="sm" variant="outline" className="gap-1.5" onClick={() => { setShowBankImport(true); setBankImportCsvText(""); setBankImportPreview(null); setBankImportResult(null); }} data-testid="bank-import-button">
+                  <Upload className="h-4 w-4" /> Import bank statement
                 </Button>
                 <Button size="sm" variant="outline" className="gap-1.5" onClick={openSendAllDialog} data-testid="send-all-invoices-button">
                   <Mail className="h-4 w-4" /> Email all
@@ -2765,22 +2913,42 @@ export default function Admin() {
                             <span>Invoiced {new Date(inv.invoiceDate).toLocaleDateString("en-ZA")}</span>
                             <span>Due {new Date(inv.dueDate).toLocaleDateString("en-ZA")}</span>
                             <span className="font-semibold text-foreground">R{inv.total.toLocaleString("en-ZA")}</span>
+                            {!!inv.amountPaid && (
+                              <span className="text-green-400">
+                                Paid R{inv.amountPaid.toLocaleString("en-ZA")}
+                                {inv.amountPaid < inv.total && ` · Balance R${(inv.total - inv.amountPaid).toLocaleString("en-ZA")}`}
+                              </span>
+                            )}
                             {inv.createdBy && <span>By {inv.createdBy}</span>}
                           </div>
                         </div>
-                        <div className="flex gap-2 shrink-0 items-center">
-                          <select
-                            className="rounded-md border border-input bg-background px-2 py-1.5 text-xs"
-                            value={inv.status}
-                            onChange={e => updateInvoiceStatus.mutate({ id: inv.id, status: e.target.value })}
-                            data-testid={`invoice-status-select-${inv.id}`}
+                        <div className="flex gap-2 shrink-0 items-center flex-wrap">
+                          {inv.status === "paid" || inv.status === "partial" ? (
+                            <Badge className={`${invoiceStatusBadgeClass(inv.status)} text-xs`} variant="outline" title="Paid/partial is set automatically from recorded payments">
+                              {inv.status}
+                            </Badge>
+                          ) : (
+                            <select
+                              className="rounded-md border border-input bg-background px-2 py-1.5 text-xs"
+                              value={inv.status}
+                              onChange={e => updateInvoiceStatus.mutate({ id: inv.id, status: e.target.value })}
+                              data-testid={`invoice-status-select-${inv.id}`}
+                            >
+                              <option value="draft">Draft</option>
+                              <option value="unpaid">Unpaid</option>
+                              <option value="overdue">Overdue</option>
+                              <option value="cancelled">Cancelled</option>
+                            </select>
+                          )}
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="gap-1.5"
+                            onClick={() => openRecordPayment(inv)}
+                            data-testid={`record-payment-${inv.id}`}
                           >
-                            <option value="draft">Draft</option>
-                            <option value="unpaid">Unpaid</option>
-                            <option value="paid">Paid</option>
-                            <option value="overdue">Overdue</option>
-                            <option value="cancelled">Cancelled</option>
-                          </select>
+                            <CheckCircle className="h-3.5 w-3.5" /> Record payment
+                          </Button>
                           <Button
                             size="sm"
                             variant="outline"
@@ -3233,6 +3401,212 @@ export default function Admin() {
                 >
                   {createInvoice.isPending ? "Creating..." : "Create invoice"}
                 </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+        )}
+
+        {showRecordPayment && recordPaymentInvoice && (
+          <Dialog open={showRecordPayment} onOpenChange={setShowRecordPayment}>
+            <DialogContent className="max-w-md">
+              <DialogHeader>
+                <DialogTitle>Record payment — {recordPaymentInvoice.invoiceNumber}</DialogTitle>
+              </DialogHeader>
+              <div className="space-y-3">
+                <p className="text-sm text-muted-foreground">
+                  {recordPaymentInvoice.billToName} — Total R{recordPaymentInvoice.total.toLocaleString("en-ZA")}
+                  {!!recordPaymentInvoice.amountPaid && `, already paid R${recordPaymentInvoice.amountPaid.toLocaleString("en-ZA")}`}
+                </p>
+                <div className="space-y-1.5">
+                  <Label htmlFor="payment-amount">Amount (R)</Label>
+                  <Input id="payment-amount" type="number" min="1" value={paymentAmount} onChange={e => setPaymentAmount(e.target.value)} data-testid="payment-amount-input" />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="payment-date">Payment date</Label>
+                  <Input id="payment-date" type="date" value={paymentDate} onChange={e => setPaymentDate(e.target.value)} data-testid="payment-date-input" />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="payment-method">Method</Label>
+                  <select
+                    id="payment-method"
+                    className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                    value={paymentMethod}
+                    onChange={e => setPaymentMethod(e.target.value)}
+                  >
+                    <option value="EFT">EFT</option>
+                    <option value="Cash">Cash</option>
+                    <option value="Other">Other</option>
+                  </select>
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="payment-reference">Reference</Label>
+                  <Input id="payment-reference" value={paymentReference} onChange={e => setPaymentReference(e.target.value)} data-testid="payment-reference-input" />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="payment-notes">Notes (optional)</Label>
+                  <Input id="payment-notes" value={paymentNotes} onChange={e => setPaymentNotes(e.target.value)} />
+                </div>
+                {recordPayment.isError && <p className="text-sm text-red-400">{(recordPayment.error as Error).message}</p>}
+              </div>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setShowRecordPayment(false)}>Cancel</Button>
+                <Button
+                  disabled={!paymentAmount || Number(paymentAmount) <= 0 || recordPayment.isPending}
+                  onClick={() => recordPayment.mutate()}
+                  data-testid="submit-record-payment"
+                >
+                  {recordPayment.isPending ? "Recording..." : "Record payment"}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+        )}
+
+        {showMultiMonth && (
+          <Dialog open={showMultiMonth} onOpenChange={setShowMultiMonth}>
+            <DialogContent className="max-w-md">
+              <DialogHeader>
+                <DialogTitle>Generate multi-month invoice</DialogTitle>
+              </DialogHeader>
+              <div className="space-y-3">
+                <p className="text-sm text-muted-foreground">
+                  For a household paying several months up front in one invoice (e.g. a resident asking for 6 months at once) instead of the normal monthly cycle. Creates one invoice with one line item per month, and blocks the normal monthly run from also billing those months.
+                </p>
+                <div className="space-y-1.5">
+                  <Label htmlFor="mm-commitment-id">Commitment ID</Label>
+                  <Input
+                    id="mm-commitment-id"
+                    type="number"
+                    placeholder="e.g. 42 — find it via Submissions search"
+                    value={multiMonthCommitmentId}
+                    onChange={e => setMultiMonthCommitmentId(e.target.value)}
+                    data-testid="mm-commitment-id-input"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="mm-months">Number of months</Label>
+                  <Input
+                    id="mm-months"
+                    type="number"
+                    min={2}
+                    max={24}
+                    value={multiMonthCount}
+                    onChange={e => setMultiMonthCount(Number(e.target.value))}
+                    data-testid="mm-months-input"
+                  />
+                </div>
+                {multiMonthGenerate.isError && <p className="text-sm text-red-400">{(multiMonthGenerate.error as Error).message}</p>}
+                {multiMonthGenerate.isSuccess && <p className="text-sm text-green-400">Invoice created.</p>}
+              </div>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setShowMultiMonth(false)}>Close</Button>
+                <Button
+                  disabled={!multiMonthCommitmentId || multiMonthCount < 2 || multiMonthGenerate.isPending}
+                  onClick={() => multiMonthGenerate.mutate()}
+                  data-testid="submit-multi-month"
+                >
+                  {multiMonthGenerate.isPending ? "Generating..." : "Generate invoice"}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+        )}
+
+        {showBankImport && (
+          <Dialog open={showBankImport} onOpenChange={setShowBankImport}>
+            <DialogContent className="max-w-3xl">
+              <DialogHeader>
+                <DialogTitle>Import bank statement (CSV)</DialogTitle>
+              </DialogHeader>
+              <div className="space-y-3">
+                <p className="text-sm text-muted-foreground">
+                  Paste an FNB CSV export below. Rows are matched to a household by street + house number found in the description, then to that household's oldest open invoice. Review before confirming — nothing is recorded until you click "Record matched payments".
+                </p>
+                {!bankImportPreview && (
+                  <>
+                    <textarea
+                      className="w-full h-40 rounded-md border border-input bg-background px-3 py-2 text-xs font-mono"
+                      placeholder="Date,Description,Amount&#10;2026-08-01,EFT Derby 12,250&#10;..."
+                      value={bankImportCsvText}
+                      onChange={e => setBankImportCsvText(e.target.value)}
+                      data-testid="bank-import-csv-input"
+                    />
+                    {bankImportPreviewMutation.isError && (
+                      <p className="text-sm text-red-400">{(bankImportPreviewMutation.error as Error).message}</p>
+                    )}
+                  </>
+                )}
+                {bankImportPreview && !bankImportResult && (
+                  <>
+                    <div className="flex gap-4 text-xs text-muted-foreground">
+                      <span>{bankImportPreview.creditRows} credit rows</span>
+                      <span className="text-green-400">{bankImportPreview.matchedCount} matched</span>
+                      <span className="text-amber-400">{bankImportPreview.needsReviewCount} needs review</span>
+                    </div>
+                    <div className="max-h-72 overflow-y-auto space-y-1 border border-border rounded-lg p-2">
+                      {bankImportPreview.matched.map(r => (
+                        <label key={r.rowIndex} className="flex items-center gap-3 px-2 py-1.5 rounded-md hover:bg-background/50 cursor-pointer text-xs">
+                          <input
+                            type="checkbox"
+                            checked={!bankImportExcluded.has(r.rowIndex)}
+                            onChange={() => setBankImportExcluded(prev => {
+                              const next = new Set(prev);
+                              if (next.has(r.rowIndex)) next.delete(r.rowIndex); else next.add(r.rowIndex);
+                              return next;
+                            })}
+                          />
+                          <span className="flex-1 truncate">{r.candidate.fullName} — {r.candidate.street} {r.candidate.houseNumber}</span>
+                          <span className="text-muted-foreground truncate max-w-[160px]">{r.description}</span>
+                          <span className="font-semibold">R{(r.amount ?? 0).toLocaleString("en-ZA")}</span>
+                          {!r.candidate.invoiceId && <span className="text-red-400">no open invoice</span>}
+                        </label>
+                      ))}
+                    </div>
+                    {bankImportPreview.needsReviewCount > 0 && (
+                      <details className="text-xs text-muted-foreground">
+                        <summary className="cursor-pointer">Needs review ({bankImportPreview.needsReviewCount}) — no household match found, not imported</summary>
+                        <div className="mt-2 space-y-1 max-h-40 overflow-y-auto">
+                          {bankImportPreview.needsReview.map(r => (
+                            <div key={r.rowIndex} className="flex justify-between">
+                              <span className="truncate">{r.description}</span>
+                              <span>R{(r.amount ?? 0).toLocaleString("en-ZA")}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </details>
+                    )}
+                    {bankImportConfirmMutation.isError && (
+                      <p className="text-sm text-red-400">{(bankImportConfirmMutation.error as Error).message}</p>
+                    )}
+                  </>
+                )}
+                {bankImportResult && (
+                  <p className="text-sm text-green-400">
+                    Recorded {bankImportResult.createdCount} payment{bankImportResult.createdCount === 1 ? "" : "s"}
+                    {bankImportResult.skippedCount > 0 ? ` (${bankImportResult.skippedCount} skipped)` : ""}.
+                  </p>
+                )}
+              </div>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setShowBankImport(false)}>Close</Button>
+                {!bankImportPreview && (
+                  <Button
+                    disabled={!bankImportCsvText.trim() || bankImportPreviewMutation.isPending}
+                    onClick={() => bankImportPreviewMutation.mutate()}
+                    data-testid="submit-bank-import-preview"
+                  >
+                    {bankImportPreviewMutation.isPending ? "Parsing..." : "Preview matches"}
+                  </Button>
+                )}
+                {bankImportPreview && !bankImportResult && (
+                  <Button
+                    disabled={bankImportConfirmMutation.isPending || bankImportPreview.matched.every(r => bankImportExcluded.has(r.rowIndex) || !r.candidate.invoiceId)}
+                    onClick={() => bankImportConfirmMutation.mutate()}
+                    data-testid="submit-bank-import-confirm"
+                  >
+                    {bankImportConfirmMutation.isPending ? "Recording..." : "Record matched payments"}
+                  </Button>
+                )}
               </DialogFooter>
             </DialogContent>
           </Dialog>
