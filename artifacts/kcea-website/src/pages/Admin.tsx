@@ -156,6 +156,7 @@ interface CaptainProfile {
   id: number;
   name: string;
   phone: string | null;
+  email: string | null;
   pin: string | null;
   pinHash: string | null;
   lastLoginAt: string | null;
@@ -212,9 +213,11 @@ export default function Admin() {
   const [importError, setImportError] = useState("");
   const [pinEdits, setPinEdits] = useState<Record<number, string>>({});
   const [phoneEdits, setPhoneEdits] = useState<Record<number, string>>({});
+  const [emailEdits, setEmailEdits] = useState<Record<number, string>>({});
   const [savedProfiles, setSavedProfiles] = useState<Set<number>>(new Set());
   const [newProfileName, setNewProfileName] = useState("");
   const [newProfilePhone, setNewProfilePhone] = useState("");
+  const [newProfileEmail, setNewProfileEmail] = useState("");
   const [showAddProfile, setShowAddProfile] = useState(false);
   const [setPinLoading, setSetPinLoading] = useState<Set<number>>(new Set());
   const [setPinResult, setSetPinResult] = useState<Record<number, { pin: string; sent: boolean }>>({});
@@ -1099,7 +1102,7 @@ export default function Admin() {
   });
 
   const updateCaptainProfile = useMutation({
-    mutationFn: ({ id, ...body }: { id: number; pin?: string; phone?: string }) =>
+    mutationFn: ({ id, ...body }: { id: number; pin?: string; phone?: string; email?: string }) =>
       fetch(`${BASE}/api/captain/management/${id}`, {
         method: "PUT",
         headers: { ...authHeaders, "Content-Type": "application/json" },
@@ -1114,7 +1117,7 @@ export default function Admin() {
   });
 
   const createCaptainProfile = useMutation({
-    mutationFn: (body: { name: string; phone: string }) =>
+    mutationFn: (body: { name: string; phone: string; email: string }) =>
       fetch(`${BASE}/api/captain/management/profiles`, {
         method: "POST",
         headers: { ...authHeaders, "Content-Type": "application/json" },
@@ -1122,7 +1125,7 @@ export default function Admin() {
       }).then(async r => { if (!r.ok) throw new Error(await r.text()); return r.json(); }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["captain-profiles"] });
-      setNewProfileName(""); setNewProfilePhone(""); setShowAddProfile(false);
+      setNewProfileName(""); setNewProfilePhone(""); setNewProfileEmail(""); setShowAddProfile(false);
     },
   });
 
@@ -2296,7 +2299,11 @@ export default function Admin() {
                       <Label className="text-xs">Phone</Label>
                       <Input value={newProfilePhone} onChange={e => setNewProfilePhone(e.target.value)} placeholder="e.g. 082 123 4567" className="bg-background border-border h-8 text-sm" />
                     </div>
-                    <Button size="sm" className="h-8" disabled={!newProfileName.trim() || createCaptainProfile.isPending} onClick={() => createCaptainProfile.mutate({ name: newProfileName.trim(), phone: newProfilePhone.trim() })}>
+                    <div className="w-48 space-y-1">
+                      <Label className="text-xs">Email</Label>
+                      <Input value={newProfileEmail} onChange={e => setNewProfileEmail(e.target.value)} placeholder="e.g. captain@example.com" className="bg-background border-border h-8 text-sm" />
+                    </div>
+                    <Button size="sm" className="h-8" disabled={!newProfileName.trim() || createCaptainProfile.isPending} onClick={() => createCaptainProfile.mutate({ name: newProfileName.trim(), phone: newProfilePhone.trim(), email: newProfileEmail.trim() })}>
                       {createCaptainProfile.isPending ? "Adding…" : "Add"}
                     </Button>
                   </div>
@@ -2393,6 +2400,33 @@ export default function Admin() {
                                     onClick={() => {
                                       const phone = phoneEdits[p.id] !== undefined ? phoneEdits[p.id] : p.phone ?? "";
                                       updateCaptainProfile.mutate({ id: p.id, phone });
+                                    }}
+                                  >
+                                    <Save className="h-3 w-3" /> Save
+                                  </Button>
+                                )}
+                              </div>
+                            </div>
+                            <div className="flex-1 min-w-[180px] space-y-1">
+                              <Label className="text-xs flex items-center gap-1"><Mail className="h-3 w-3" /> Email</Label>
+                              <div className="flex gap-2">
+                                <Input
+                                  value={emailEdits[p.id] ?? p.email ?? ""}
+                                  onChange={e => setEmailEdits(prev => ({ ...prev, [p.id]: e.target.value }))}
+                                  placeholder="e.g. captain@example.com"
+                                  className="bg-background border-border h-8 text-xs"
+                                />
+                                {isSaved ? (
+                                  <span className="text-xs text-green-400 flex items-center gap-1 shrink-0"><CheckCircle className="h-3.5 w-3.5" /> Saved</span>
+                                ) : (
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    className="h-8 text-xs px-2 gap-1 border-border shrink-0"
+                                    disabled={updateCaptainProfile.isPending}
+                                    onClick={() => {
+                                      const email = emailEdits[p.id] !== undefined ? emailEdits[p.id] : p.email ?? "";
+                                      updateCaptainProfile.mutate({ id: p.id, email });
                                     }}
                                   >
                                     <Save className="h-3 w-3" /> Save
