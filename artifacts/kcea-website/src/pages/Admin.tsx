@@ -609,6 +609,7 @@ export default function Admin() {
       invoiceId: number | null;
       invoiceNumber: string | null;
       balanceDue: number | null;
+      possibleDuplicate: boolean;
     };
   }
   interface BankImportPreview {
@@ -637,7 +638,11 @@ export default function Admin() {
       }),
     onSuccess: data => {
       setBankImportPreview(data);
-      setBankImportExcluded(new Set());
+      // Likely-duplicate rows (same invoice/amount/date as an already-recorded
+      // payment — e.g. re-importing a statement that overlaps a previous
+      // import) start unchecked, so a re-run doesn't silently double-count
+      // real payments unless the admin deliberately re-checks them.
+      setBankImportExcluded(new Set(data.matched.filter(r => r.candidate.possibleDuplicate).map(r => r.rowIndex)));
       setBankImportResult(null);
     },
   });
@@ -3630,6 +3635,11 @@ export default function Admin() {
                           <span className="text-muted-foreground truncate max-w-[160px]">{r.description}</span>
                           <span className="font-semibold">R{(r.amount ?? 0).toLocaleString("en-ZA")}</span>
                           {!r.candidate.invoiceId && <span className="text-red-400">no open invoice</span>}
+                          {r.candidate.possibleDuplicate && (
+                            <span className="text-amber-400" title="A payment for this invoice, amount, and date already exists — probably already recorded from an earlier import">
+                              possible duplicate
+                            </span>
+                          )}
                         </label>
                       ))}
                     </div>
