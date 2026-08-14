@@ -3570,10 +3570,31 @@ export default function Admin() {
               </DialogHeader>
               <div className="space-y-3">
                 <p className="text-sm text-muted-foreground">
-                  Paste an FNB CSV export below. Rows are matched to a household by street + house number found in the description, then to that household's oldest open invoice. Review before confirming — nothing is recorded until you click "Record matched payments".
+                  Upload or paste an FNB CSV export below. Rows are matched to a household by street + house number found in the description, then to that household's oldest open invoice. Review before confirming — nothing is recorded until you click "Record matched payments".
                 </p>
                 {!bankImportPreview && (
                   <>
+                    <div className="flex items-center gap-3">
+                      <input
+                        type="file"
+                        accept=".csv,text/csv,text/plain"
+                        onChange={async e => {
+                          const file = e.target.files?.[0];
+                          if (!file) return;
+                          const text = await file.text();
+                          setBankImportCsvText(text);
+                          e.target.value = "";
+                        }}
+                        className="text-xs file:mr-3 file:rounded-md file:border file:border-input file:bg-background file:px-3 file:py-1.5 file:text-xs file:cursor-pointer"
+                        data-testid="bank-import-file-input"
+                      />
+                      {bankImportCsvText && (
+                        <span className="text-xs text-muted-foreground">
+                          {bankImportCsvText.trim().split("\n").length} lines loaded
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-xs text-muted-foreground">— or paste it directly —</p>
                     <textarea
                       className="w-full h-40 rounded-md border border-input bg-background px-3 py-2 text-xs font-mono"
                       placeholder="Date,Description,Amount&#10;2026-08-01,EFT Derby 12,250&#10;..."
