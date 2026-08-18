@@ -2,7 +2,7 @@ import { useState, useRef, useMemo, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Shield, Save, LogIn, AlertTriangle, CheckCircle, Check, Key, Pencil,
-  Trash2, Download, Upload, Users, UserPlus, ClipboardList, BarChart3, Search, MessageSquare, RefreshCw, Phone, ExternalLink, Settings as SettingsIcon, Heart, Mail, X, FileText, Plus, Printer
+  Trash2, Download, Upload, Users, UserPlus, ClipboardList, BarChart3, Search, MessageSquare, RefreshCw, Phone, ExternalLink, Settings as SettingsIcon, Heart, Mail, X, FileText, Plus, Printer, Landmark, EyeOff
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -14,7 +14,7 @@ import { computeStreetStatus, getStreetStatusClass, STREET_OPTIONS } from "@/lib
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 
-const TABS = ["submissions", "stats", "captains", "manage-captains", "incomplete", "captain-mgmt", "pledges", "invoices", "settings"] as const;
+const TABS = ["submissions", "stats", "captains", "manage-captains", "incomplete", "captain-mgmt", "pledges", "invoices", "bank-transactions", "settings"] as const;
 type Tab = typeof TABS[number];
 
 interface PledgeRow {
@@ -664,6 +664,139 @@ export default function Admin() {
     onSuccess: data => {
       qc.invalidateQueries({ queryKey: ["invoices"] });
       setBankImportResult(data);
+    },
+  });
+
+  // ── Bank Transactions ledger ──────────────────────────────────────
+  // Persistent version of the import above: every credit row imported ever
+  // lives here (status unallocated/allocated/ignored), so nothing is lost
+  // once a dialog closes — an admin can come back any time and allocate
+  // what's left. Modelled on Slipstream's swool.io Bank Transactions page.
+  interface BankTxCommitmentInfo {
+    id: number;
+    fullName: string;
+    street: string;
+    houseNumber: string;
+  }
+  interface BankTxRow {
+    id: number;
+    transactionDate: string;
+    description: string;
+    amount: number;
+    status: "unallocated" | "allocated" | "ignored";
+    suggestedCommitmentId: number | null;
+    commitmentId: number | null;
+    invoiceId: number | null;
+    paymentId: number | null;
+    suggestedCommitment: BankTxCommitmentInfo | null;
+    commitment: BankTxCommitmentInfo | null;
+  }
+  const [hideAllocatedTx, setHideAllocatedTx] = useState(true);
+  const [showTxImport, setShowTxImport] = useState(false);
+  const [txImportCsvText, setTxImportCsvText] = useState("");
+  const [txImportResult, setTxImportResult] = useState<{ inserted: number; autoAllocated: number; unallocated: number; skippedDuplicate: number } | null>(null);
+
+  const { data: bankTransactions = [], isLoading: bankTxLoading } = useQuery<BankTxRow[]>({
+    queryKey: ["bank-transactions"],
+    queryFn: () => fetch(`${BASE}/api/bank-transactions`, { headers: authHeaders }).then(async r => {
+      if (!r.ok) throw new Error("Failed to load");
+      return r.json();
+    }),
+    enabled: authed && activeTab === "bank-transactions",
+  });
+  const visibleBankTransactions = hideAllocatedTx ? bankTransactions.filter(t => t.status !== "allocated") : bankTransactions;
+  const unallocatedTxCount = bankTransactions.filter(t => t.status === "unallocated").length;
+
+  const txImportMutation = useMutation({
+    mutationFn: () =>
+      fetch(`${BASE}/api/bank-transactions/import`, {
+        method: "POST",
+        headers: { ...authHeaders, "Content-Type": "application/json" },
+        body: JSON.stringify({ csv: txImportCsvText }),
+      }).then(async r => {
+        if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error ?? "Failed to import");
+        return r.json();
+      }),
+    onSuccess: data => {
+      setTxImportResult(data);
+      setTxImportCsvText("");
+      qc.invalidateQueries({ queryKey: ["bank-transactions"] });
+      qc.invalidateQueries({ queryKey: ["invoices"] });
+    },
+  });
+
+  const txIgnoreMutation = useMutation({
+    mutationFn: (id: number) =>
+      fetch(`${BASE}/api/bank-transactions/${id}/ignore`, { method: "POST", headers: authHeaders }).then(async r => {
+        if (!r.ok) throw new Error("Failed to ignore");
+        return r.json();
+      }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["bank-transactions"] }),
+  });
+  const txUnignoreMutation = useMutation({
+    mutationFn: (id: number) =>
+      fetch(`${BASE}/api/bank-transactions/${id}/unignore`, { method: "POST", headers: authHeaders }).then(async r => {
+        if (!r.ok) throw new Error("Failed to unignore");
+        return r.json();
+      }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["bank-transactions"] }),
+  });
+
+  // ── Allocate flow ──────────────────────────────────────────────────
+  const [allocatingTx, setAllocatingTx] = useState<BankTxRow | null>(null);
+  const [allocateSearch, setAllocateSearch] = useState("");
+  const [allocateCommitmentId, setAllocateCommitmentId] = useState<number | null>(null);
+  const [allocateInvoiceId, setAllocateInvoiceId] = useState<number | null>(null);
+
+  interface SimpleCommitment { id: number; fullName: string; street: string; houseNumber: string }
+  const { data: allCommitments = [] } = useQuery<SimpleCommitment[]>({
+    queryKey: ["commitments-for-allocate"],
+    queryFn: () => fetch(`${BASE}/api/commitments`, { headers: authHeaders }).then(async r => {
+      if (!r.ok) throw new Error("Failed to load");
+      return r.json();
+    }),
+    enabled: authed && !!allocatingTx,
+  });
+  const allocateMatches = allocateSearch.trim().length >= 2
+    ? allCommitments.filter(c =>
+        c.fullName.toLowerCase().includes(allocateSearch.toLowerCase()) ||
+        `${c.street} ${c.houseNumber}`.toLowerCase().includes(allocateSearch.toLowerCase()),
+      ).slice(0, 8)
+    : [];
+  const { data: allocateInvoices = [] } = useQuery<InvoiceRow[]>({
+    queryKey: ["invoices-for-allocate", allocateCommitmentId],
+    queryFn: () => fetch(`${BASE}/api/invoices`, { headers: authHeaders }).then(async r => {
+      if (!r.ok) throw new Error("Failed to load");
+      const all = await r.json() as InvoiceRow[];
+      return all.filter(i => i.commitmentId === allocateCommitmentId);
+    }),
+    enabled: !!allocateCommitmentId,
+  });
+
+  function openAllocate(tx: BankTxRow) {
+    setAllocatingTx(tx);
+    setAllocateSearch("");
+    setAllocateCommitmentId(tx.suggestedCommitmentId ?? null);
+    setAllocateInvoiceId(null);
+    if (tx.suggestedCommitment) {
+      setAllocateSearch(`${tx.suggestedCommitment.fullName} — ${tx.suggestedCommitment.street} ${tx.suggestedCommitment.houseNumber}`);
+    }
+  }
+
+  const allocateMutation = useMutation({
+    mutationFn: () =>
+      fetch(`${BASE}/api/bank-transactions/${allocatingTx!.id}/allocate`, {
+        method: "POST",
+        headers: { ...authHeaders, "Content-Type": "application/json" },
+        body: JSON.stringify({ commitmentId: allocateCommitmentId, invoiceId: allocateInvoiceId }),
+      }).then(async r => {
+        if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error ?? "Failed to allocate");
+        return r.json();
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["bank-transactions"] });
+      qc.invalidateQueries({ queryKey: ["invoices"] });
+      setAllocatingTx(null);
     },
   });
 
@@ -1586,7 +1719,7 @@ export default function Admin() {
 
         {/* Tabs */}
         <div className="flex gap-1 border-b border-border">
-          {([ ["submissions", ClipboardList, "Submissions"], ["stats", BarChart3, "Stats"], ["captains", Users, "Captains"], ["manage-captains", UserPlus, "Manage Captains"], ["incomplete", AlertTriangle, "Incomplete"], ["captain-mgmt", Key, "Captain Portal"], ["pledges", Heart, "Pledges"], ["invoices", FileText, "Invoices"], ["settings", SettingsIcon, "Settings"] ] as const).map(([tab, Icon, label]) => (
+          {([ ["submissions", ClipboardList, "Submissions"], ["stats", BarChart3, "Stats"], ["captains", Users, "Captains"], ["manage-captains", UserPlus, "Manage Captains"], ["incomplete", AlertTriangle, "Incomplete"], ["captain-mgmt", Key, "Captain Portal"], ["pledges", Heart, "Pledges"], ["invoices", FileText, "Invoices"], ["bank-transactions", Landmark, "Bank Transactions"], ["settings", SettingsIcon, "Settings"] ] as const).map(([tab, Icon, label]) => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
@@ -1603,6 +1736,9 @@ export default function Admin() {
               )}
               {tab === "incomplete" && incompleteRecords.length > 0 && (
                 <span className="bg-amber-500/20 text-amber-400 text-xs px-1.5 py-0.5 rounded-full">{incompleteRecords.length}</span>
+              )}
+              {tab === "bank-transactions" && unallocatedTxCount > 0 && (
+                <span className="bg-amber-500/20 text-amber-400 text-xs px-1.5 py-0.5 rounded-full">{unallocatedTxCount}</span>
               )}
             </button>
           ))}
@@ -3688,6 +3824,229 @@ export default function Admin() {
                     {bankImportConfirmMutation.isPending ? "Recording..." : "Record matched payments"}
                   </Button>
                 )}
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+        )}
+
+        {/* Bank Transactions Tab */}
+        {activeTab === "bank-transactions" && (
+          <Card className="bg-card border-card-border">
+            <CardHeader className="flex flex-row items-center justify-between gap-4 pb-4 flex-wrap">
+              <div>
+                <CardTitle className="text-xl flex items-center gap-2"><Landmark className="h-5 w-5 text-primary" /> Bank Transactions</CardTitle>
+                <p className="text-xs text-muted-foreground mt-1">
+                  {bankTransactions.length} imported · <span className="font-bold text-amber-400">{unallocatedTxCount} unallocated</span>
+                </p>
+              </div>
+              <div className="flex items-center gap-3">
+                <label className="flex items-center gap-1.5 text-sm cursor-pointer">
+                  <input type="checkbox" checked={hideAllocatedTx} onChange={e => setHideAllocatedTx(e.target.checked)} />
+                  Hide Allocated
+                </label>
+                <Button size="sm" variant="outline" className="gap-1.5" onClick={() => { setShowTxImport(true); setTxImportCsvText(""); setTxImportResult(null); }} data-testid="bank-tx-import-button">
+                  <Upload className="h-4 w-4" /> Import CSV
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent>
+              {bankTxLoading ? (
+                <p className="text-sm text-muted-foreground">Loading...</p>
+              ) : visibleBankTransactions.length === 0 ? (
+                <p className="text-sm text-muted-foreground py-8 text-center">
+                  {bankTransactions.length === 0 ? "No transactions imported yet." : "Nothing unallocated — everything's been allocated."}
+                </p>
+              ) : (
+                <div className="space-y-2 max-h-[36rem] overflow-y-auto pr-1">
+                  {visibleBankTransactions.map(tx => (
+                    <div key={tx.id} className="rounded-lg border border-card-border p-3 flex items-center justify-between gap-3 flex-wrap" data-testid={`bank-tx-row-${tx.id}`}>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-xs text-muted-foreground">{new Date(tx.transactionDate).toLocaleDateString("en-ZA")}</span>
+                          <span className="text-sm truncate">{tx.description}</span>
+                          <span className="font-semibold text-sm">R{tx.amount.toLocaleString("en-ZA")}</span>
+                        </div>
+                        <div className="mt-1">
+                          {tx.status === "allocated" && tx.commitment && (
+                            <Badge className="bg-green-500/20 text-green-400 border-green-500/20 text-xs" variant="outline">
+                              Allocated — {tx.commitment.fullName} ({tx.commitment.street} {tx.commitment.houseNumber})
+                            </Badge>
+                          )}
+                          {tx.status === "ignored" && (
+                            <Badge className="bg-muted text-muted-foreground border-transparent text-xs" variant="outline">Ignored</Badge>
+                          )}
+                          {tx.status === "unallocated" && tx.suggestedCommitment && (
+                            <Badge className="bg-amber-500/20 text-amber-400 border-amber-500/20 text-xs" variant="outline">
+                              Suggested: {tx.suggestedCommitment.fullName} ({tx.suggestedCommitment.street} {tx.suggestedCommitment.houseNumber})
+                            </Badge>
+                          )}
+                          {tx.status === "unallocated" && !tx.suggestedCommitment && (
+                            <Badge className="bg-red-500/20 text-red-400 border-red-500/20 text-xs" variant="outline">No match found</Badge>
+                          )}
+                        </div>
+                      </div>
+                      <div className="flex gap-2 shrink-0">
+                        {tx.status === "unallocated" && (
+                          <>
+                            <Button size="sm" className="gap-1.5" onClick={() => openAllocate(tx)} data-testid={`allocate-tx-${tx.id}`}>
+                              <Check className="h-3.5 w-3.5" /> Allocate
+                            </Button>
+                            <Button size="sm" variant="outline" className="gap-1.5" onClick={() => txIgnoreMutation.mutate(tx.id)} disabled={txIgnoreMutation.isPending}>
+                              <EyeOff className="h-3.5 w-3.5" /> Ignore
+                            </Button>
+                          </>
+                        )}
+                        {tx.status === "ignored" && (
+                          <Button size="sm" variant="outline" className="gap-1.5" onClick={() => txUnignoreMutation.mutate(tx.id)} disabled={txUnignoreMutation.isPending}>
+                            Unignore
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        )}
+
+        {showTxImport && (
+          <Dialog open={showTxImport} onOpenChange={setShowTxImport}>
+            <DialogContent className="max-w-2xl">
+              <DialogHeader>
+                <DialogTitle>Import bank statement (CSV)</DialogTitle>
+              </DialogHeader>
+              <div className="space-y-3">
+                <p className="text-sm text-muted-foreground">
+                  Every credit row gets saved permanently. Confident matches with an open invoice are allocated automatically; everything else lands in the list below as unallocated, for you to allocate any time.
+                </p>
+                {!txImportResult && (
+                  <>
+                    <div className="flex items-center gap-3">
+                      <input
+                        type="file"
+                        accept=".csv,text/csv,text/plain"
+                        onChange={async e => {
+                          const file = e.target.files?.[0];
+                          if (!file) return;
+                          const text = await file.text();
+                          setTxImportCsvText(text);
+                          e.target.value = "";
+                        }}
+                        className="text-xs file:mr-3 file:rounded-md file:border file:border-input file:bg-background file:px-3 file:py-1.5 file:text-xs file:cursor-pointer"
+                        data-testid="bank-tx-file-input"
+                      />
+                      {txImportCsvText && (
+                        <span className="text-xs text-muted-foreground">{txImportCsvText.trim().split("\n").length} lines loaded</span>
+                      )}
+                    </div>
+                    <p className="text-xs text-muted-foreground">— or paste it directly —</p>
+                    <textarea
+                      className="w-full h-40 rounded-md border border-input bg-background px-3 py-2 text-xs font-mono"
+                      placeholder="Date,Description,Amount&#10;2026-08-01,EFT Derby 12,250&#10;..."
+                      value={txImportCsvText}
+                      onChange={e => setTxImportCsvText(e.target.value)}
+                      data-testid="bank-tx-csv-input"
+                    />
+                    {txImportMutation.isError && <p className="text-sm text-red-400">{(txImportMutation.error as Error).message}</p>}
+                  </>
+                )}
+                {txImportResult && (
+                  <div className="rounded-lg border border-teal-500/30 bg-teal-500/10 p-4 space-y-1">
+                    <p className="text-sm font-semibold text-teal-300">Done</p>
+                    <p className="text-xs text-teal-200/90">
+                      {txImportResult.inserted} new transaction{txImportResult.inserted === 1 ? "" : "s"} imported
+                      {" · "}{txImportResult.autoAllocated} auto-allocated{" · "}{txImportResult.unallocated} need review
+                      {txImportResult.skippedDuplicate > 0 ? ` · ${txImportResult.skippedDuplicate} already on file, skipped` : ""}.
+                    </p>
+                  </div>
+                )}
+              </div>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setShowTxImport(false)}>Close</Button>
+                {!txImportResult && (
+                  <Button
+                    disabled={!txImportCsvText.trim() || txImportMutation.isPending}
+                    onClick={() => txImportMutation.mutate()}
+                    data-testid="submit-bank-tx-import"
+                  >
+                    {txImportMutation.isPending ? "Importing..." : "Import"}
+                  </Button>
+                )}
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+        )}
+
+        {allocatingTx && (
+          <Dialog open={!!allocatingTx} onOpenChange={open => !open && setAllocatingTx(null)}>
+            <DialogContent className="max-w-lg">
+              <DialogHeader>
+                <DialogTitle>Allocate — R{allocatingTx.amount.toLocaleString("en-ZA")}</DialogTitle>
+              </DialogHeader>
+              <div className="space-y-3">
+                <p className="text-sm text-muted-foreground">{allocatingTx.description}</p>
+                <div className="space-y-1.5">
+                  <Label htmlFor="allocate-search">Household</Label>
+                  <Input
+                    id="allocate-search"
+                    placeholder="Search by name or street..."
+                    value={allocateSearch}
+                    onChange={e => { setAllocateSearch(e.target.value); setAllocateCommitmentId(null); setAllocateInvoiceId(null); }}
+                    data-testid="allocate-search-input"
+                  />
+                  {allocateSearch.trim().length >= 2 && !allocateCommitmentId && (
+                    <div className="max-h-40 overflow-y-auto border border-border rounded-lg">
+                      {allocateMatches.length === 0 ? (
+                        <p className="text-xs text-muted-foreground p-2">No matches</p>
+                      ) : (
+                        allocateMatches.map(c => (
+                          <button
+                            key={c.id}
+                            type="button"
+                            className="w-full text-left px-3 py-1.5 text-sm hover:bg-background/50"
+                            onClick={() => { setAllocateCommitmentId(c.id); setAllocateSearch(`${c.fullName} — ${c.street} ${c.houseNumber}`); }}
+                          >
+                            {c.fullName} — {c.street} {c.houseNumber}
+                          </button>
+                        ))
+                      )}
+                    </div>
+                  )}
+                </div>
+                {allocateCommitmentId && (
+                  <div className="space-y-1.5">
+                    <Label htmlFor="allocate-invoice">Invoice</Label>
+                    <select
+                      id="allocate-invoice"
+                      className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                      value={allocateInvoiceId ?? ""}
+                      onChange={e => setAllocateInvoiceId(e.target.value ? Number(e.target.value) : null)}
+                      data-testid="allocate-invoice-select"
+                    >
+                      <option value="">Select an invoice...</option>
+                      {allocateInvoices.map(inv => (
+                        <option key={inv.id} value={inv.id}>
+                          {inv.invoiceNumber} — R{inv.total.toLocaleString("en-ZA")} ({inv.status})
+                        </option>
+                      ))}
+                    </select>
+                    {allocateInvoices.length === 0 && (
+                      <p className="text-xs text-amber-400">No invoices on file for this household yet.</p>
+                    )}
+                  </div>
+                )}
+                {allocateMutation.isError && <p className="text-sm text-red-400">{(allocateMutation.error as Error).message}</p>}
+              </div>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setAllocatingTx(null)}>Cancel</Button>
+                <Button
+                  disabled={!allocateCommitmentId || !allocateInvoiceId || allocateMutation.isPending}
+                  onClick={() => allocateMutation.mutate()}
+                  data-testid="submit-allocate"
+                >
+                  {allocateMutation.isPending ? "Allocating..." : "Allocate"}
+                </Button>
               </DialogFooter>
             </DialogContent>
           </Dialog>

@@ -247,3 +247,29 @@ export const paymentsTable = pgTable("payments", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 export type Payment = typeof paymentsTable.$inferSelect;
+
+// ── Bank Transactions ────────────────────────────────────────────
+// A permanent record of every credit line imported from a bank statement
+// (CSV), independent of whether it's been matched to a household yet —
+// unlike the earlier one-time "preview then confirm" import flow, these
+// rows persist so an admin can come back later and allocate anything left
+// unmatched. Modelled on Slipstream's swool.io Bank Transactions page.
+// "status": unallocated | allocated | ignored.
+// "suggestedCommitmentId" is the matcher's best guess (street + house
+// number found in the description) — shown to pre-fill the allocate form,
+// but never auto-trusted unless there's also an open invoice to attach to
+// (see bank-transactions.ts import logic).
+export const bankTransactionsTable = pgTable("bank_transactions", {
+  id: serial("id").primaryKey(),
+  transactionDate: timestamp("transaction_date").notNull(),
+  description: text("description").notNull(),
+  amount: integer("amount").notNull(),
+  status: text("status").notNull().default("unallocated"),
+  suggestedCommitmentId: integer("suggested_commitment_id").references(() => commitmentsTable.id),
+  commitmentId: integer("commitment_id").references(() => commitmentsTable.id),
+  invoiceId: integer("invoice_id").references(() => invoicesTable.id),
+  paymentId: integer("payment_id").references(() => paymentsTable.id),
+  source: text("source").notNull().default("csv_import"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+export type BankTransaction = typeof bankTransactionsTable.$inferSelect;
