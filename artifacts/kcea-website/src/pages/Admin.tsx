@@ -28,6 +28,7 @@ interface PledgeRow {
   houseNumber: string | null;
   message: string | null;
   commitmentId: number | null;
+  amountReceived: number;
   createdAt: string;
 }
 
@@ -634,6 +635,12 @@ export default function Admin() {
     street: string;
     houseNumber: string;
   }
+  interface BankTxPledgeInfo {
+    id: number;
+    fullName: string;
+    amount: number;
+    amountReceived: number;
+  }
   interface BankTxRow {
     id: number;
     transactionDate: string;
@@ -644,8 +651,10 @@ export default function Admin() {
     commitmentId: number | null;
     invoiceId: number | null;
     paymentId: number | null;
+    pledgeId: number | null;
     suggestedCommitment: BankTxCommitmentInfo | null;
     commitment: BankTxCommitmentInfo | null;
+    pledge: BankTxPledgeInfo | null;
   }
   const [hideAllocatedTx, setHideAllocatedTx] = useState(true);
   const [showTxImport, setShowTxImport] = useState(false);
@@ -729,11 +738,60 @@ export default function Admin() {
     enabled: !!allocateCommitmentId,
   });
 
+  // Invoice vs pledge — some large payments (e.g. a lump sum) turn out to be
+  // a contribution toward the project rather than the regular household
+  // levy. Added 2026-08-18 after finding real R5,000 payments that didn't
+  // fit any single invoice.
+  const [allocateMode, setAllocateMode] = useState<"invoice" | "pledge">("invoice");
+  const [pledgeSearch, setPledgeSearch] = useState("");
+  const [pledgeSelectedId, setPledgeSelectedId] = useState<number | null>(null);
+  const [pledgeNewName, setPledgeNewName] = useState("");
+  const [pledgeNewAmount, setPledgeNewAmount] = useState("");
+
+  interface SimplePledge { id: number; fullName: string; amount: number; amountReceived: number }
+  const { data: allPledges = [] } = useQuery<SimplePledge[]>({
+    queryKey: ["pledges-for-allocate"],
+    queryFn: () => fetch(`${BASE}/api/pledges`, { headers: authHeaders }).then(async r => {
+      if (!r.ok) throw new Error("Failed to load");
+      return r.json();
+    }),
+    enabled: authed && !!allocatingTx && allocateMode === "pledge",
+  });
+  const pledgeMatches = pledgeSearch.trim().length >= 2
+    ? allPledges.filter(p => p.fullName.toLowerCase().includes(pledgeSearch.toLowerCase())).slice(0, 8)
+    : [];
+
+  const allocatePledgeMutation = useMutation({
+    mutationFn: () =>
+      fetch(`${BASE}/api/bank-transactions/${allocatingTx!.id}/allocate-pledge`, {
+        method: "POST",
+        headers: { ...authHeaders, "Content-Type": "application/json" },
+        body: JSON.stringify(
+          pledgeSelectedId
+            ? { pledgeId: pledgeSelectedId }
+            : { newPledge: { fullName: pledgeNewName, amount: Number(pledgeNewAmount) || allocatingTx!.amount, isResident: !!allocatingTx!.suggestedCommitmentId } },
+        ),
+      }).then(async r => {
+        if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error ?? "Failed to allocate to pledge");
+        return r.json();
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["bank-transactions"] });
+      qc.invalidateQueries({ queryKey: ["pledges"] });
+      setAllocatingTx(null);
+    },
+  });
+
   function openAllocate(tx: BankTxRow) {
     setAllocatingTx(tx);
+    setAllocateMode("invoice");
     setAllocateSearch("");
     setAllocateCommitmentId(tx.suggestedCommitmentId ?? null);
     setAllocateInvoiceId(null);
+    setPledgeSearch("");
+    setPledgeSelectedId(null);
+    setPledgeNewName(tx.suggestedCommitment?.fullName ?? "");
+    setPledgeNewAmount(String(tx.amount));
     if (tx.suggestedCommitment) {
       setAllocateSearch(`${tx.suggestedCommitment.fullName} — ${tx.suggestedCommitment.street} ${tx.suggestedCommitment.houseNumber}`);
     }
@@ -2893,6 +2951,14 @@ export default function Admin() {
                               <Badge className="bg-primary/20 text-primary border-primary/20 text-xs" variant="outline">
                                 R{p.amount.toLocaleString("en-ZA")}
                               </Badge>
+                              {p.amountReceived > 0 && (
+                                <Badge
+                                  className={`text-xs ${p.amountReceived >= p.amount ? "bg-green-500/20 text-green-400 border-green-500/20" : "bg-amber-500/20 text-amber-400 border-amber-500/20"}`}
+                                  variant="outline"
+                                >
+                                  Received R{p.amountReceived.toLocaleString("en-ZA")}
+                                </Badge>
+                              )}
                               {p.isResident ? (
                                 <Badge className="bg-blue-500/20 text-blue-400 border-blue-500/20 text-xs" variant="outline">
                                   Resident — {p.street} {p.houseNumber}
@@ -3760,6 +3826,11 @@ export default function Admin() {
                               Allocated — {tx.commitment.fullName} ({tx.commitment.street} {tx.commitment.houseNumber})
                             </Badge>
                           )}
+                          {tx.status === "allocated" && tx.pledge && (
+                            <Badge className="bg-purple-500/20 text-purple-400 border-purple-500/20 text-xs" variant="outline">
+                              Pledge — {tx.pledge.fullName} (R{tx.pledge.amountReceived.toLocaleString("en-ZA")} of R{tx.pledge.amount.toLocaleString("en-ZA")})
+                            </Badge>
+                          )}
                           {tx.status === "ignored" && (
                             <Badge className="bg-muted text-muted-foreground border-transparent text-xs" variant="outline">Ignored</Badge>
                           )}
@@ -3874,67 +3945,146 @@ export default function Admin() {
               </DialogHeader>
               <div className="space-y-3">
                 <p className="text-sm text-muted-foreground">{allocatingTx.description}</p>
-                <div className="space-y-1.5">
-                  <Label htmlFor="allocate-search">Household</Label>
-                  <Input
-                    id="allocate-search"
-                    placeholder="Search by name or street..."
-                    value={allocateSearch}
-                    onChange={e => { setAllocateSearch(e.target.value); setAllocateCommitmentId(null); setAllocateInvoiceId(null); }}
-                    data-testid="allocate-search-input"
-                  />
-                  {allocateSearch.trim().length >= 2 && !allocateCommitmentId && (
-                    <div className="max-h-40 overflow-y-auto border border-border rounded-lg">
-                      {allocateMatches.length === 0 ? (
-                        <p className="text-xs text-muted-foreground p-2">No matches</p>
-                      ) : (
-                        allocateMatches.map(c => (
-                          <button
-                            key={c.id}
-                            type="button"
-                            className="w-full text-left px-3 py-1.5 text-sm hover:bg-background/50"
-                            onClick={() => { setAllocateCommitmentId(c.id); setAllocateSearch(`${c.fullName} — ${c.street} ${c.houseNumber}`); }}
-                          >
-                            {c.fullName} — {c.street} {c.houseNumber}
-                          </button>
-                        ))
+
+                <div className="flex gap-1 rounded-lg border border-border p-1 w-fit">
+                  <button
+                    type="button"
+                    className={`px-3 py-1 rounded-md text-xs font-medium ${allocateMode === "invoice" ? "bg-primary/15 text-primary" : "text-muted-foreground"}`}
+                    onClick={() => setAllocateMode("invoice")}
+                    data-testid="allocate-mode-invoice"
+                  >
+                    Invoice
+                  </button>
+                  <button
+                    type="button"
+                    className={`px-3 py-1 rounded-md text-xs font-medium ${allocateMode === "pledge" ? "bg-primary/15 text-primary" : "text-muted-foreground"}`}
+                    onClick={() => setAllocateMode("pledge")}
+                    data-testid="allocate-mode-pledge"
+                  >
+                    Pledge
+                  </button>
+                </div>
+
+                {allocateMode === "invoice" ? (
+                  <>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="allocate-search">Household</Label>
+                      <Input
+                        id="allocate-search"
+                        placeholder="Search by name or street..."
+                        value={allocateSearch}
+                        onChange={e => { setAllocateSearch(e.target.value); setAllocateCommitmentId(null); setAllocateInvoiceId(null); }}
+                        data-testid="allocate-search-input"
+                      />
+                      {allocateSearch.trim().length >= 2 && !allocateCommitmentId && (
+                        <div className="max-h-40 overflow-y-auto border border-border rounded-lg">
+                          {allocateMatches.length === 0 ? (
+                            <p className="text-xs text-muted-foreground p-2">No matches</p>
+                          ) : (
+                            allocateMatches.map(c => (
+                              <button
+                                key={c.id}
+                                type="button"
+                                className="w-full text-left px-3 py-1.5 text-sm hover:bg-background/50"
+                                onClick={() => { setAllocateCommitmentId(c.id); setAllocateSearch(`${c.fullName} — ${c.street} ${c.houseNumber}`); }}
+                              >
+                                {c.fullName} — {c.street} {c.houseNumber}
+                              </button>
+                            ))
+                          )}
+                        </div>
                       )}
                     </div>
-                  )}
-                </div>
-                {allocateCommitmentId && (
-                  <div className="space-y-1.5">
-                    <Label htmlFor="allocate-invoice">Invoice</Label>
-                    <select
-                      id="allocate-invoice"
-                      className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                      value={allocateInvoiceId ?? ""}
-                      onChange={e => setAllocateInvoiceId(e.target.value ? Number(e.target.value) : null)}
-                      data-testid="allocate-invoice-select"
-                    >
-                      <option value="">Select an invoice...</option>
-                      {allocateInvoices.map(inv => (
-                        <option key={inv.id} value={inv.id}>
-                          {inv.invoiceNumber} — R{inv.total.toLocaleString("en-ZA")} ({inv.status})
-                        </option>
-                      ))}
-                    </select>
-                    {allocateInvoices.length === 0 && (
-                      <p className="text-xs text-amber-400">No invoices on file for this household yet.</p>
+                    {allocateCommitmentId && (
+                      <div className="space-y-1.5">
+                        <Label htmlFor="allocate-invoice">Invoice</Label>
+                        <select
+                          id="allocate-invoice"
+                          className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                          value={allocateInvoiceId ?? ""}
+                          onChange={e => setAllocateInvoiceId(e.target.value ? Number(e.target.value) : null)}
+                          data-testid="allocate-invoice-select"
+                        >
+                          <option value="">Select an invoice...</option>
+                          {allocateInvoices.map(inv => (
+                            <option key={inv.id} value={inv.id}>
+                              {inv.invoiceNumber} — R{inv.total.toLocaleString("en-ZA")} ({inv.status})
+                            </option>
+                          ))}
+                        </select>
+                        {allocateInvoices.length === 0 && (
+                          <p className="text-xs text-amber-400">No invoices on file for this household yet — generate one first (e.g. Multi-month invoice) if this payment covers more than the current month.</p>
+                        )}
+                      </div>
                     )}
-                  </div>
+                    {allocateMutation.isError && <p className="text-sm text-red-400">{(allocateMutation.error as Error).message}</p>}
+                  </>
+                ) : (
+                  <>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="pledge-search">Existing pledge</Label>
+                      <Input
+                        id="pledge-search"
+                        placeholder="Search by name..."
+                        value={pledgeSearch}
+                        onChange={e => { setPledgeSearch(e.target.value); setPledgeSelectedId(null); }}
+                        data-testid="pledge-search-input"
+                      />
+                      {pledgeSearch.trim().length >= 2 && !pledgeSelectedId && (
+                        <div className="max-h-40 overflow-y-auto border border-border rounded-lg">
+                          {pledgeMatches.length === 0 ? (
+                            <p className="text-xs text-muted-foreground p-2">No matches</p>
+                          ) : (
+                            pledgeMatches.map(p => (
+                              <button
+                                key={p.id}
+                                type="button"
+                                className="w-full text-left px-3 py-1.5 text-sm hover:bg-background/50"
+                                onClick={() => { setPledgeSelectedId(p.id); setPledgeSearch(p.fullName); }}
+                              >
+                                {p.fullName} — pledged R{p.amount.toLocaleString("en-ZA")}, received R{p.amountReceived.toLocaleString("en-ZA")}
+                              </button>
+                            ))
+                          )}
+                        </div>
+                      )}
+                    </div>
+                    {!pledgeSelectedId && (
+                      <div className="space-y-2 pt-1 border-t border-border">
+                        <p className="text-xs text-muted-foreground pt-2">— or create a new pledge —</p>
+                        <div className="space-y-1.5">
+                          <Label htmlFor="pledge-new-name">Name</Label>
+                          <Input id="pledge-new-name" value={pledgeNewName} onChange={e => setPledgeNewName(e.target.value)} data-testid="pledge-new-name-input" />
+                        </div>
+                        <div className="space-y-1.5">
+                          <Label htmlFor="pledge-new-amount">Pledge amount (R) — how much they're pledging in total, not just this payment</Label>
+                          <Input id="pledge-new-amount" type="number" value={pledgeNewAmount} onChange={e => setPledgeNewAmount(e.target.value)} data-testid="pledge-new-amount-input" />
+                        </div>
+                      </div>
+                    )}
+                    {allocatePledgeMutation.isError && <p className="text-sm text-red-400">{(allocatePledgeMutation.error as Error).message}</p>}
+                  </>
                 )}
-                {allocateMutation.isError && <p className="text-sm text-red-400">{(allocateMutation.error as Error).message}</p>}
               </div>
               <DialogFooter>
                 <Button variant="outline" onClick={() => setAllocatingTx(null)}>Cancel</Button>
-                <Button
-                  disabled={!allocateCommitmentId || !allocateInvoiceId || allocateMutation.isPending}
-                  onClick={() => allocateMutation.mutate()}
-                  data-testid="submit-allocate"
-                >
-                  {allocateMutation.isPending ? "Allocating..." : "Allocate"}
-                </Button>
+                {allocateMode === "invoice" ? (
+                  <Button
+                    disabled={!allocateCommitmentId || !allocateInvoiceId || allocateMutation.isPending}
+                    onClick={() => allocateMutation.mutate()}
+                    data-testid="submit-allocate"
+                  >
+                    {allocateMutation.isPending ? "Allocating..." : "Allocate"}
+                  </Button>
+                ) : (
+                  <Button
+                    disabled={(!pledgeSelectedId && !pledgeNewName.trim()) || allocatePledgeMutation.isPending}
+                    onClick={() => allocatePledgeMutation.mutate()}
+                    data-testid="submit-allocate-pledge"
+                  >
+                    {allocatePledgeMutation.isPending ? "Allocating..." : "Allocate to pledge"}
+                  </Button>
+                )}
               </DialogFooter>
             </DialogContent>
           </Dialog>
