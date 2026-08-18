@@ -1680,7 +1680,7 @@ export default function Admin() {
         </div>
       </header>
 
-      <main className="container mx-auto px-4 py-10 max-w-5xl space-y-8">
+      <main className="container mx-auto px-4 py-10 max-w-7xl space-y-8">
         <div>
           <h1 className="text-3xl font-bold">Dashboard</h1>
           <p className="text-muted-foreground mt-1">Manage submissions, stats, and street captain data.</p>
@@ -1717,32 +1717,36 @@ export default function Admin() {
           </Card>
         </div>
 
-        {/* Tabs */}
-        <div className="flex gap-1 border-b border-border">
-          {([ ["submissions", ClipboardList, "Submissions"], ["stats", BarChart3, "Stats"], ["captains", Users, "Captains"], ["manage-captains", UserPlus, "Manage Captains"], ["incomplete", AlertTriangle, "Incomplete"], ["captain-mgmt", Key, "Captain Portal"], ["pledges", Heart, "Pledges"], ["invoices", FileText, "Invoices"], ["bank-transactions", Landmark, "Bank Transactions"], ["settings", SettingsIcon, "Settings"] ] as const).map(([tab, Icon, label]) => (
-            <button
-              key={tab}
-              onClick={() => setActiveTab(tab)}
-              className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${
-                activeTab === tab
-                  ? "border-primary text-primary"
-                  : "border-transparent text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              <Icon className="h-4 w-4" />
-              {label}
-              {tab === "submissions" && commitments.length > 0 && (
-                <span className="bg-primary/20 text-primary text-xs px-1.5 py-0.5 rounded-full">{commitments.length}</span>
-              )}
-              {tab === "incomplete" && incompleteRecords.length > 0 && (
-                <span className="bg-amber-500/20 text-amber-400 text-xs px-1.5 py-0.5 rounded-full">{incompleteRecords.length}</span>
-              )}
-              {tab === "bank-transactions" && unallocatedTxCount > 0 && (
-                <span className="bg-amber-500/20 text-amber-400 text-xs px-1.5 py-0.5 rounded-full">{unallocatedTxCount}</span>
-              )}
-            </button>
-          ))}
-        </div>
+        <div className="flex gap-6 items-start">
+          {/* Sidebar nav */}
+          <nav className="w-56 shrink-0 space-y-1 sticky top-24">
+            {([ ["submissions", ClipboardList, "Submissions"], ["stats", BarChart3, "Stats"], ["captains", Users, "Captains"], ["manage-captains", UserPlus, "Manage Captains"], ["incomplete", AlertTriangle, "Incomplete"], ["captain-mgmt", Key, "Captain Portal"], ["pledges", Heart, "Pledges"], ["invoices", FileText, "Invoices"], ["bank-transactions", Landmark, "Bank Transactions"], ["settings", SettingsIcon, "Settings"] ] as const).map(([tab, Icon, label]) => (
+              <button
+                key={tab}
+                onClick={() => setActiveTab(tab)}
+                className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+                  activeTab === tab
+                    ? "bg-primary/15 text-primary"
+                    : "text-muted-foreground hover:bg-card hover:text-foreground"
+                }`}
+              >
+                <Icon className="h-4 w-4 shrink-0" />
+                <span className="flex-1 text-left">{label}</span>
+                {tab === "submissions" && commitments.length > 0 && (
+                  <span className="bg-primary/20 text-primary text-xs px-1.5 py-0.5 rounded-full">{commitments.length}</span>
+                )}
+                {tab === "incomplete" && incompleteRecords.length > 0 && (
+                  <span className="bg-amber-500/20 text-amber-400 text-xs px-1.5 py-0.5 rounded-full">{incompleteRecords.length}</span>
+                )}
+                {tab === "bank-transactions" && unallocatedTxCount > 0 && (
+                  <span className="bg-amber-500/20 text-amber-400 text-xs px-1.5 py-0.5 rounded-full">{unallocatedTxCount}</span>
+                )}
+              </button>
+            ))}
+          </nav>
+
+          {/* Tab content */}
+          <div className="flex-1 min-w-0 space-y-8">
 
         {/* Submissions Tab */}
         {activeTab === "submissions" && (
@@ -4196,6 +4200,8 @@ export default function Admin() {
           </div>
         )}
 
+          </div>
+        </div>
       </main>
 
       {(() => {
