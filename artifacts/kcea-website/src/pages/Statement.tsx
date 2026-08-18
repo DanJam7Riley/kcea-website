@@ -42,6 +42,9 @@ interface StatementData {
 }
 
 const rands = (n: number) => `R${n.toLocaleString("en-ZA")}`;
+// Positive = owed to KCEA; negative = KCEA owes them (paid more than
+// invoiced) — shown as credit rather than a confusing negative number.
+const balanceLabel = (n: number) => (n < 0 ? `${rands(Math.abs(n))} in credit` : rands(n));
 const shortDate = (d: string) => new Date(d).toLocaleDateString("en-ZA", { day: "2-digit", month: "short", year: "numeric" });
 
 function statusBadge(status: string) {
@@ -138,9 +141,9 @@ export default function Statement() {
                     <p className="text-sm text-muted-foreground">{data.commitment.street} No. {data.commitment.houseNumber}</p>
                   </div>
                   <div className="text-right">
-                    <p className="text-xs text-muted-foreground uppercase tracking-wide">Total outstanding</p>
+                    <p className="text-xs text-muted-foreground uppercase tracking-wide">{data.totalOutstanding < 0 ? "Credit balance" : "Total outstanding"}</p>
                     <p className={`text-2xl font-bold ${data.totalOutstanding > 0 ? "text-red-400" : "text-green-400"}`}>
-                      {rands(data.totalOutstanding)}
+                      {balanceLabel(data.totalOutstanding)}
                     </p>
                   </div>
                 </CardContent>

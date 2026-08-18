@@ -282,3 +282,41 @@ export const bankTransactionsTable = pgTable("bank_transactions", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 export type BankTransaction = typeof bankTransactionsTable.$inferSelect;
+
+// ── Communication log ────────────────────────────────────────────
+// One row per outbound message actually sent to a resident (invoice email,
+// test send, statement email) — added 2026-08-18 so the resident detail
+// page can show what's actually gone out, instead of admin having to guess
+// whether an invoice was already emailed to someone.
+export const communicationLogTable = pgTable("communication_log", {
+  id: serial("id").primaryKey(),
+  commitmentId: integer("commitment_id")
+    .notNull()
+    .references(() => commitmentsTable.id, { onDelete: "cascade" }),
+  channel: text("channel").notNull().default("email"), // email | whatsapp
+  type: text("type").notNull(), // invoice | invoice_test | statement | legacy_confirm | other
+  subject: text("subject").notNull(),
+  recipient: text("recipient"),
+  sentAt: timestamp("sent_at").notNull().defaultNow(),
+});
+export type CommunicationLogEntry = typeof communicationLogTable.$inferSelect;
+
+// ── Expenses ──────────────────────────────────────────────────────
+// Lightweight expense tracking — added 2026-08-18. KCEA has real outgoing
+// costs (bank fees, the Traffic Impact Study deposit, application/city
+// fees, and eventually ongoing security/insurance/maintenance) alongside
+// the resident-payment income already tracked. This is NOT double-entry
+// bookkeeping (no ledger/journal/trial balance) — just enough to answer
+// "what have we spent and on what". Full accounting belongs in real
+// accounting software once KCEA reaches steady-state operations.
+export const expensesTable = pgTable("expenses", {
+  id: serial("id").primaryKey(),
+  expenseDate: timestamp("expense_date").notNull().defaultNow(),
+  category: text("category").notNull(),
+  amount: integer("amount").notNull(),
+  description: text("description").notNull(),
+  reference: text("reference"),
+  createdBy: text("created_by"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+export type Expense = typeof expensesTable.$inferSelect;

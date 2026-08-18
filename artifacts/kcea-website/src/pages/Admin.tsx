@@ -2,7 +2,7 @@ import { useState, useRef, useMemo, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Shield, Save, LogIn, AlertTriangle, CheckCircle, Check, Key, Pencil,
-  Trash2, Download, Upload, Users, UserPlus, ClipboardList, BarChart3, Search, MessageSquare, RefreshCw, Phone, ExternalLink, Settings as SettingsIcon, Heart, Mail, X, FileText, Plus, Printer, Landmark, EyeOff, Eye
+  Trash2, Download, Upload, Users, UserPlus, ClipboardList, BarChart3, Search, MessageSquare, RefreshCw, Phone, ExternalLink, Settings as SettingsIcon, Heart, Mail, X, FileText, Plus, Printer, Landmark, EyeOff, Eye, Receipt
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -10,11 +10,12 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Textarea } from "@/components/ui/textarea";
 import { computeStreetStatus, getStreetStatusClass, STREET_OPTIONS } from "@/lib/streets";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 
-const TABS = ["submissions", "stats", "captains", "manage-captains", "incomplete", "captain-mgmt", "pledges", "invoices", "bank-transactions", "settings"] as const;
+const TABS = ["submissions", "stats", "captains", "manage-captains", "incomplete", "captain-mgmt", "pledges", "invoices", "bank-transactions", "expenses", "settings"] as const;
 type Tab = typeof TABS[number];
 
 interface PledgeRow {
@@ -159,6 +160,7 @@ interface Commitment {
   imported: boolean;
   paymentConfirmed: boolean;
   submittedAt: string;
+  notes?: string | null;
 }
 
 interface ImportResult {
@@ -205,6 +207,225 @@ function TypeBadge({ type }: { type: string }) {
     : <Badge className="bg-blue-500/20 text-blue-400 border-blue-500/20 text-xs" variant="outline">Monthly</Badge>;
 }
 
+// ── Resident detail page ─────────────────────────────────────────────
+// Full-width view (not a cramped popup) with four tabs, modelled on
+// Slipstream's swool.io tabbed customer page — Profile / Account /
+// Communications / Notes. Reuses the existing resident statement endpoint
+// (admin auth bypasses its public token check) rather than a new one.
+interface ResidentStatementLineItem { description: string; quantity: number; unitAmount: number; amount: number }
+interface ResidentStatementPayment { amount: number; paymentDate: string; method: string; reference: string | null }
+interface ResidentStatementInvoice {
+  id: number;
+  invoiceNumber: string;
+  invoiceDate: string;
+  dueDate: string;
+  status: string;
+  total: number;
+  amountPaid: number;
+  balance: number;
+  lineItems: ResidentStatementLineItem[];
+  payments: ResidentStatementPayment[];
+}
+interface ResidentStatement {
+  commitment: { id: number; fullName: string; street: string; houseNumber: string; commitmentType: string };
+  invoices: ResidentStatementInvoice[];
+  totalOutstanding: number;
+  invoiceCount: number;
+}
+interface CommunicationLogRow {
+  id: number;
+  channel: string;
+  type: string;
+  subject: string;
+  recipient: string | null;
+  sentAt: string;
+}
+
+function ResidentDetailPanel({
+  residentId,
+  contact,
+  statement,
+  statementLoading,
+  authHeaders,
+  onBack,
+  onEdit,
+  onSaveNotes,
+  savingNotes,
+  invoiceStatusBadgeClass,
+}: {
+  residentId: number;
+  contact: Commitment | null;
+  statement: ResidentStatement | undefined;
+  statementLoading: boolean;
+  authHeaders: Record<string, string>;
+  onBack: () => void;
+  onEdit: () => void;
+  onSaveNotes: (id: number, notes: string) => void;
+  savingNotes: boolean;
+  invoiceStatusBadgeClass: (status: string) => string;
+}) {
+  const [detailTab, setDetailTab] = useState<"profile" | "account" | "communications" | "notes">("profile");
+  const [notesDraft, setNotesDraft] = useState(contact?.notes ?? "");
+
+  useEffect(() => {
+    setNotesDraft(contact?.notes ?? "");
+  }, [contact?.id, contact?.notes]);
+
+  const { data: communications = [], isLoading: commsLoading } = useQuery<CommunicationLogRow[]>({
+    queryKey: ["resident-communications", residentId],
+    queryFn: () => fetch(`${BASE}/api/commitments/${residentId}/communications`, { headers: authHeaders }).then(async r => {
+      if (!r.ok) throw new Error("Failed to load");
+      return r.json();
+    }),
+    enabled: detailTab === "communications",
+  });
+
+  const tabs: { key: typeof detailTab; label: string }[] = [
+    { key: "profile", label: "Profile" },
+    { key: "account", label: "Account" },
+    { key: "communications", label: "Communications" },
+    { key: "notes", label: "Notes" },
+  ];
+
+  return (
+    <Card className="bg-card border-card-border">
+      <CardHeader className="flex flex-row items-center justify-between gap-4 pb-4 flex-wrap">
+        <div>
+          <button type="button" onClick={onBack} className="text-xs text-muted-foreground hover:text-foreground mb-1">
+            ← Back to Residents
+          </button>
+          <CardTitle className="text-xl">{contact?.fullName ?? statement?.commitment.fullName ?? "Resident"}</CardTitle>
+        </div>
+        <div className="flex items-center gap-3">
+          {statement && (
+            <div className="text-right">
+              <p className="text-xs text-muted-foreground uppercase tracking-wide">{statement.totalOutstanding < 0 ? "Credit balance" : "Balance"}</p>
+              <p className={`text-lg font-bold ${statement.totalOutstanding > 0 ? "text-red-400" : "text-green-400"}`}>
+                {statement.totalOutstanding < 0
+                  ? `R${Math.abs(statement.totalOutstanding).toLocaleString("en-ZA")} in credit`
+                  : `R${statement.totalOutstanding.toLocaleString("en-ZA")}`}
+              </p>
+            </div>
+          )}
+          <Button size="sm" onClick={onEdit} className="gap-1.5"><Pencil className="h-3.5 w-3.5" /> Edit</Button>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="flex gap-1 border-b border-border">
+          {tabs.map(t => (
+            <button
+              key={t.key}
+              onClick={() => setDetailTab(t.key)}
+              className={`px-3 py-2 text-sm font-medium border-b-2 transition-colors ${
+                detailTab === t.key ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"
+              }`}
+              data-testid={`resident-tab-${t.key}`}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+
+        {detailTab === "profile" && (
+          <div className="rounded-lg border border-border bg-background/50 p-4 space-y-2 text-sm max-w-md">
+            {contact?.phone && <p className="flex items-center gap-1.5"><Phone className="h-3.5 w-3.5 text-muted-foreground" /> {contact.phone}</p>}
+            {contact?.email && <p className="flex items-center gap-1.5"><Mail className="h-3.5 w-3.5 text-muted-foreground" /> {contact.email}</p>}
+            {statement && (
+              <p className="text-muted-foreground">
+                {statement.commitment.street} No. {statement.commitment.houseNumber}
+                {" · "}{statement.commitment.commitmentType === "onceoff" ? "Once-off R3,000" : "Monthly R250"}
+              </p>
+            )}
+            {contact?.submittedAt && (
+              <p className="text-xs text-muted-foreground">
+                Registered {new Date(contact.submittedAt).toLocaleDateString("en-ZA", { day: "2-digit", month: "short", year: "numeric" })}
+              </p>
+            )}
+            <p className="text-xs text-muted-foreground pt-1">Click "Edit" above to change contact details.</p>
+          </div>
+        )}
+
+        {detailTab === "account" && (
+          statementLoading ? (
+            <p className="text-sm text-muted-foreground py-6 text-center">Loading…</p>
+          ) : !statement || statement.invoices.length === 0 ? (
+            <p className="text-sm text-muted-foreground py-6 text-center">No invoices on file yet.</p>
+          ) : (
+            <div className="space-y-2">
+              {[...statement.invoices].reverse().map(inv => (
+                <div key={inv.id} className="rounded-lg border border-border p-3 text-sm">
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                    <span className="font-mono text-xs font-semibold">{inv.invoiceNumber}</span>
+                    <Badge className={`${invoiceStatusBadgeClass(inv.status)} text-xs`} variant="outline">{inv.status}</Badge>
+                  </div>
+                  <div className="flex items-center justify-between text-xs text-muted-foreground mt-1 flex-wrap gap-1">
+                    <span>Invoiced {new Date(inv.invoiceDate).toLocaleDateString("en-ZA")} · Due {new Date(inv.dueDate).toLocaleDateString("en-ZA")}</span>
+                    <span>R{inv.total.toLocaleString("en-ZA")}{inv.amountPaid > 0 ? ` (R${inv.amountPaid.toLocaleString("en-ZA")} paid)` : ""}</span>
+                  </div>
+                  {inv.payments.length > 0 && (
+                    <div className="mt-1.5 space-y-0.5">
+                      {inv.payments.map((p, i) => (
+                        <p key={i} className="text-xs text-green-400">
+                          R{p.amount.toLocaleString("en-ZA")} · {p.method} · {new Date(p.paymentDate).toLocaleDateString("en-ZA")}
+                          {p.reference ? ` · ${p.reference}` : ""}
+                        </p>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )
+        )}
+
+        {detailTab === "communications" && (
+          commsLoading ? (
+            <p className="text-sm text-muted-foreground py-6 text-center">Loading…</p>
+          ) : communications.length === 0 ? (
+            <p className="text-sm text-muted-foreground py-6 text-center">Nothing sent to this resident yet.</p>
+          ) : (
+            <div className="space-y-2">
+              {communications.map(c => (
+                <div key={c.id} className="rounded-lg border border-border p-3 text-sm flex items-center justify-between gap-3 flex-wrap">
+                  <div>
+                    <p className="font-medium">{c.subject}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {c.channel} · {c.type}{c.recipient ? ` · ${c.recipient}` : ""}
+                    </p>
+                  </div>
+                  <span className="text-xs text-muted-foreground whitespace-nowrap">
+                    {new Date(c.sentAt).toLocaleDateString("en-ZA", { day: "2-digit", month: "short", year: "numeric" })}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )
+        )}
+
+        {detailTab === "notes" && (
+          <div className="space-y-2 max-w-lg">
+            <Textarea
+              value={notesDraft}
+              onChange={e => setNotesDraft(e.target.value)}
+              placeholder="Admin notes about this resident — not visible to the resident."
+              className="min-h-32"
+              data-testid="resident-notes-textarea"
+            />
+            <Button
+              size="sm"
+              disabled={savingNotes || notesDraft === (contact?.notes ?? "")}
+              onClick={() => onSaveNotes(residentId, notesDraft)}
+              data-testid="save-resident-notes"
+            >
+              {savingNotes ? "Saving…" : "Save note"}
+            </Button>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 export default function Admin() {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -224,26 +445,6 @@ export default function Admin() {
   // in one place. Reuses the existing resident statement endpoint (admin
   // auth bypasses the token check there).
   const [viewingResidentId, setViewingResidentId] = useState<number | null>(null);
-  interface ResidentStatementLineItem { description: string; quantity: number; unitAmount: number; amount: number }
-  interface ResidentStatementPayment { amount: number; paymentDate: string; method: string; reference: string | null }
-  interface ResidentStatementInvoice {
-    id: number;
-    invoiceNumber: string;
-    invoiceDate: string;
-    dueDate: string;
-    status: string;
-    total: number;
-    amountPaid: number;
-    balance: number;
-    lineItems: ResidentStatementLineItem[];
-    payments: ResidentStatementPayment[];
-  }
-  interface ResidentStatement {
-    commitment: { id: number; fullName: string; street: string; houseNumber: string; commitmentType: string };
-    invoices: ResidentStatementInvoice[];
-    totalOutstanding: number;
-    invoiceCount: number;
-  }
   const { data: residentStatement, isLoading: residentStatementLoading } = useQuery<ResidentStatement>({
     queryKey: ["resident-statement", viewingResidentId],
     queryFn: () => fetch(`${BASE}/api/commitments/${viewingResidentId}/statement`, { headers: authHeaders }).then(async r => {
@@ -469,6 +670,61 @@ export default function Admin() {
       qc.invalidateQueries({ queryKey: ["pledges"] });
       qc.invalidateQueries({ queryKey: ["pledge-total"] });
     },
+  });
+
+  // ── Expenses ───────────────────────────────────────────────────────
+  // Lightweight tracking (not double-entry bookkeeping) — see expenses.ts.
+  interface ExpenseRow { id: number; expenseDate: string; category: string; amount: number; description: string; reference: string | null; createdBy: string | null }
+  const { data: expensesData, isLoading: expensesLoading } = useQuery<{ expenses: ExpenseRow[]; total: number }>({
+    queryKey: ["expenses"],
+    queryFn: () => fetch(`${BASE}/api/expenses`, { headers: authHeaders }).then(async r => {
+      if (!r.ok) throw new Error("Unauthorized");
+      return r.json();
+    }),
+    enabled: authed && activeTab === "expenses",
+  });
+  const expenses = expensesData?.expenses ?? [];
+
+  const [showAddExpense, setShowAddExpense] = useState(false);
+  const [expenseDate, setExpenseDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [expenseCategory, setExpenseCategory] = useState("");
+  const [expenseAmount, setExpenseAmount] = useState("");
+  const [expenseDescription, setExpenseDescription] = useState("");
+  const [expenseReference, setExpenseReference] = useState("");
+
+  const createExpense = useMutation({
+    mutationFn: () =>
+      fetch(`${BASE}/api/expenses`, {
+        method: "POST",
+        headers: { ...authHeaders, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          expenseDate: new Date(expenseDate).toISOString(),
+          category: expenseCategory,
+          amount: Number(expenseAmount),
+          description: expenseDescription,
+          reference: expenseReference || undefined,
+        }),
+      }).then(async r => {
+        if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error ?? "Failed to record expense");
+        return r.json();
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["expenses"] });
+      setShowAddExpense(false);
+      setExpenseCategory("");
+      setExpenseAmount("");
+      setExpenseDescription("");
+      setExpenseReference("");
+    },
+  });
+
+  const deleteExpense = useMutation({
+    mutationFn: (id: number) =>
+      fetch(`${BASE}/api/expenses/${id}`, { method: "DELETE", headers: authHeaders }).then(async r => {
+        if (!r.ok) throw new Error("Failed to delete expense");
+        return r.json();
+      }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["expenses"] }),
   });
 
   const [invoiceSearch, setInvoiceSearch] = useState("");
@@ -1770,7 +2026,7 @@ export default function Admin() {
         <div className="flex gap-6 items-start">
           {/* Sidebar nav */}
           <nav className="w-56 shrink-0 space-y-1 sticky top-24">
-            {([ ["submissions", ClipboardList, "Residents"], ["stats", BarChart3, "Stats"], ["captains", Users, "Captains"], ["manage-captains", UserPlus, "Manage Captains"], ["incomplete", AlertTriangle, "Incomplete"], ["captain-mgmt", Key, "Captain Portal"], ["pledges", Heart, "Pledges"], ["invoices", FileText, "Invoices"], ["bank-transactions", Landmark, "Bank Transactions"], ["settings", SettingsIcon, "Settings"] ] as const).map(([tab, Icon, label]) => (
+            {([ ["submissions", ClipboardList, "Residents"], ["stats", BarChart3, "Stats"], ["captains", Users, "Captains"], ["manage-captains", UserPlus, "Manage Captains"], ["incomplete", AlertTriangle, "Incomplete"], ["captain-mgmt", Key, "Captain Portal"], ["pledges", Heart, "Pledges"], ["invoices", FileText, "Invoices"], ["bank-transactions", Landmark, "Bank Transactions"], ["expenses", Receipt, "Expenses"], ["settings", SettingsIcon, "Settings"] ] as const).map(([tab, Icon, label]) => (
               <button
                 key={tab}
                 onClick={() => setActiveTab(tab)}
@@ -1797,7 +2053,21 @@ export default function Admin() {
 
           {/* Tab content */}
           <div className="flex-1 min-w-0 space-y-8">
-
+          {viewingResidentId !== null ? (
+            <ResidentDetailPanel
+              residentId={viewingResidentId}
+              contact={viewingResidentContact}
+              statement={residentStatement}
+              statementLoading={residentStatementLoading}
+              authHeaders={authHeaders}
+              onBack={() => setViewingResidentId(null)}
+              onEdit={() => { if (viewingResidentContact) { openEditCommitment(viewingResidentContact); setViewingResidentId(null); } }}
+              onSaveNotes={(id, notes) => updateCommitment.mutate({ id, patch: { notes } })}
+              savingNotes={updateCommitment.isPending}
+              invoiceStatusBadgeClass={invoiceStatusBadgeClass}
+            />
+          ) : (
+          <>
         {/* Submissions Tab */}
         {activeTab === "submissions" && (
           <Card className="bg-card border-card-border">
@@ -2069,78 +2339,6 @@ export default function Admin() {
               )}
             </CardContent>
           </Card>
-        )}
-
-        {viewingResidentId !== null && (
-          <Dialog open={viewingResidentId !== null} onOpenChange={open => !open && setViewingResidentId(null)}>
-            <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
-              <DialogHeader>
-                <DialogTitle>{viewingResidentContact?.fullName ?? "Resident"}</DialogTitle>
-              </DialogHeader>
-              {residentStatementLoading ? (
-                <p className="text-sm text-muted-foreground py-6 text-center">Loading…</p>
-              ) : !residentStatement ? (
-                <p className="text-sm text-red-400 py-6 text-center">Failed to load.</p>
-              ) : (
-                <div className="space-y-4">
-                  <div className="rounded-lg border border-border bg-background/50 p-3 space-y-1 text-sm">
-                    {viewingResidentContact?.phone && (
-                      <p className="flex items-center gap-1.5"><Phone className="h-3.5 w-3.5 text-muted-foreground" /> {viewingResidentContact.phone}</p>
-                    )}
-                    {viewingResidentContact?.email && (
-                      <p className="flex items-center gap-1.5"><Mail className="h-3.5 w-3.5 text-muted-foreground" /> {viewingResidentContact.email}</p>
-                    )}
-                    <p className="text-muted-foreground">
-                      {residentStatement.commitment.street} No. {residentStatement.commitment.houseNumber}
-                      {" · "}{residentStatement.commitment.commitmentType === "onceoff" ? "Once-off R3,000" : "Monthly R250"}
-                    </p>
-                    {viewingResidentContact?.submittedAt && (
-                      <p className="text-xs text-muted-foreground">
-                        Registered {new Date(viewingResidentContact.submittedAt).toLocaleDateString("en-ZA", { day: "2-digit", month: "short", year: "numeric" })}
-                      </p>
-                    )}
-                  </div>
-
-                  <div className="flex items-center justify-between rounded-lg border border-border p-3">
-                    <span className="text-sm text-muted-foreground">Balance</span>
-                    <span className={`text-lg font-bold ${residentStatement.totalOutstanding > 0 ? "text-red-400" : "text-green-400"}`}>
-                      R{residentStatement.totalOutstanding.toLocaleString("en-ZA")}
-                    </span>
-                  </div>
-
-                  <div>
-                    <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">Recent Transactions</p>
-                    {residentStatement.invoices.length === 0 ? (
-                      <p className="text-sm text-muted-foreground">No invoices on file yet.</p>
-                    ) : (
-                      <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
-                        {[...residentStatement.invoices].reverse().map(inv => (
-                          <div key={inv.id} className="rounded-lg border border-border p-2.5 text-sm">
-                            <div className="flex items-center justify-between gap-2">
-                              <span className="font-mono text-xs font-semibold">{inv.invoiceNumber}</span>
-                              <Badge className={`${invoiceStatusBadgeClass(inv.status)} text-xs`} variant="outline">{inv.status}</Badge>
-                            </div>
-                            <div className="flex items-center justify-between text-xs text-muted-foreground mt-1">
-                              <span>{new Date(inv.invoiceDate).toLocaleDateString("en-ZA")}</span>
-                              <span>R{inv.total.toLocaleString("en-ZA")}{inv.amountPaid > 0 ? ` (R${inv.amountPaid.toLocaleString("en-ZA")} paid)` : ""}</span>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )}
-              <DialogFooter>
-                <Button variant="outline" onClick={() => setViewingResidentId(null)}>Close</Button>
-                {viewingResidentContact && (
-                  <Button onClick={() => { openEditCommitment(viewingResidentContact); setViewingResidentId(null); }} className="gap-1.5">
-                    <Pencil className="h-3.5 w-3.5" /> Edit
-                  </Button>
-                )}
-              </DialogFooter>
-            </DialogContent>
-          </Dialog>
         )}
 
         {/* Stats Tab */}
@@ -4213,6 +4411,101 @@ export default function Admin() {
           </Dialog>
         )}
 
+        {/* Expenses Tab */}
+        {activeTab === "expenses" && (
+          <Card className="bg-card border-card-border">
+            <CardHeader className="flex flex-row items-center justify-between gap-4 pb-4 flex-wrap">
+              <div>
+                <CardTitle className="text-xl flex items-center gap-2"><Receipt className="h-5 w-5 text-primary" /> Expenses</CardTitle>
+                <p className="text-xs text-muted-foreground mt-1">
+                  {expenses.length} expense{expenses.length === 1 ? "" : "s"} · Total: <span className="font-bold text-primary">R{(expensesData?.total ?? 0).toLocaleString("en-ZA")}</span>
+                </p>
+              </div>
+              <Button size="sm" className="gap-1.5" onClick={() => setShowAddExpense(true)} data-testid="add-expense-button">
+                <Plus className="h-4 w-4" /> Add expense
+              </Button>
+            </CardHeader>
+            <CardContent>
+              {expensesLoading ? (
+                <p className="text-sm text-muted-foreground">Loading...</p>
+              ) : expenses.length === 0 ? (
+                <p className="text-sm text-muted-foreground py-8 text-center">No expenses recorded yet.</p>
+              ) : (
+                <div className="space-y-2">
+                  {expenses.map(e => (
+                    <div key={e.id} className="rounded-lg border border-card-border p-3 flex items-center justify-between gap-3 flex-wrap" data-testid={`expense-row-${e.id}`}>
+                      <div>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-medium text-sm">{e.description}</span>
+                          <Badge className="bg-red-500/20 text-red-400 border-red-500/20 text-xs" variant="outline">{e.category}</Badge>
+                        </div>
+                        <p className="text-xs text-muted-foreground mt-0.5">
+                          {new Date(e.expenseDate).toLocaleDateString("en-ZA", { day: "2-digit", month: "short", year: "numeric" })}
+                          {e.reference ? ` · ${e.reference}` : ""}
+                          {e.createdBy ? ` · By ${e.createdBy}` : ""}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-3 shrink-0">
+                        <span className="font-semibold text-sm">R{e.amount.toLocaleString("en-ZA")}</span>
+                        <button
+                          onClick={() => { if (confirm(`Delete expense "${e.description}"?`)) deleteExpense.mutate(e.id); }}
+                          className="text-muted-foreground hover:text-red-400 transition-colors p-1 rounded"
+                          title="Delete"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        )}
+
+        {showAddExpense && (
+          <Dialog open={showAddExpense} onOpenChange={setShowAddExpense}>
+            <DialogContent className="max-w-md">
+              <DialogHeader>
+                <DialogTitle>Add expense</DialogTitle>
+              </DialogHeader>
+              <div className="space-y-3">
+                <div className="space-y-1.5">
+                  <Label htmlFor="expense-date">Date</Label>
+                  <Input id="expense-date" type="date" value={expenseDate} onChange={e => setExpenseDate(e.target.value)} />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="expense-category">Category</Label>
+                  <Input id="expense-category" placeholder="e.g. Bank fees, TIS deposit, Application fee" value={expenseCategory} onChange={e => setExpenseCategory(e.target.value)} data-testid="expense-category-input" />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="expense-amount">Amount (R)</Label>
+                  <Input id="expense-amount" type="number" min="1" value={expenseAmount} onChange={e => setExpenseAmount(e.target.value)} data-testid="expense-amount-input" />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="expense-description">Description</Label>
+                  <Input id="expense-description" value={expenseDescription} onChange={e => setExpenseDescription(e.target.value)} data-testid="expense-description-input" />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="expense-reference">Reference (optional)</Label>
+                  <Input id="expense-reference" value={expenseReference} onChange={e => setExpenseReference(e.target.value)} />
+                </div>
+                {createExpense.isError && <p className="text-sm text-red-400">{(createExpense.error as Error).message}</p>}
+              </div>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setShowAddExpense(false)}>Cancel</Button>
+                <Button
+                  disabled={!expenseCategory.trim() || !expenseAmount || Number(expenseAmount) <= 0 || !expenseDescription.trim() || createExpense.isPending}
+                  onClick={() => createExpense.mutate()}
+                  data-testid="submit-add-expense"
+                >
+                  {createExpense.isPending ? "Saving..." : "Add expense"}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+        )}
+
         {/* Settings Tab */}
         {activeTab === "settings" && (
           <div className="space-y-6">
@@ -4356,7 +4649,8 @@ export default function Admin() {
             </Card>
           </div>
         )}
-
+          </>
+          )}
           </div>
         </div>
       </main>

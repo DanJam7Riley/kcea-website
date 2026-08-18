@@ -75,11 +75,20 @@ router.get("/commitments/:id/statement", async (req, res) => {
       );
     }
 
-    let runningBalance = 0;
+    // Per-invoice "balance" stays floored at 0 — an individual invoice is
+    // either owed-on or fully settled, never itself "negative". But the
+    // household's overall position must NOT be floored per-invoice before
+    // summing, or a real credit balance (paid more in total than invoiced)
+    // silently disappears into "R0" instead of showing as credit — found
+    // 2026-08-18 on a real resident (paid R1,500 against R500 total across
+    // two invoices, showed "Balance R0" instead of "R1,000 in credit").
+    let totalInvoiced = 0;
+    let totalPaidOverall = 0;
     const statementInvoices = invoices.map(inv => {
       const amountPaid = (paymentsByInvoice.get(inv.id) ?? []).reduce((s, p) => s + p.amount, 0);
       const balance = Math.max(0, inv.total - amountPaid);
-      runningBalance += balance;
+      totalInvoiced += inv.total;
+      totalPaidOverall += amountPaid;
       return {
         id: inv.id,
         invoiceNumber: inv.invoiceNumber,
@@ -93,6 +102,8 @@ router.get("/commitments/:id/statement", async (req, res) => {
         payments: paymentsByInvoice.get(inv.id) ?? [],
       };
     });
+    // Positive = owes KCEA; negative = KCEA owes them (in credit).
+    const totalOutstanding = totalInvoiced - totalPaidOverall;
 
     res.json({
       commitment: {
@@ -103,7 +114,7 @@ router.get("/commitments/:id/statement", async (req, res) => {
         commitmentType: commitment.commitmentType,
       },
       invoices: statementInvoices,
-      totalOutstanding: runningBalance,
+      totalOutstanding,
       invoiceCount: invoiceIds.length,
     });
   } catch (err) {

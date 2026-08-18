@@ -15,6 +15,8 @@ import legacyConfirmRouter from "./legacy-confirm";
 import paymentsRouter from "./payments";
 import statementRouter from "./statement";
 import bankTransactionsRouter from "./bank-transactions";
+import communicationsRouter from "./communications";
+import expensesRouter from "./expenses";
 
 const router: IRouter = Router();
 
@@ -32,6 +34,8 @@ router.use(legacyConfirmRouter);
 router.use(paymentsRouter);
 router.use(statementRouter);
 router.use(bankTransactionsRouter);
+router.use(communicationsRouter);
+router.use(expensesRouter);
 router.use(volunteersRouter);
 router.use(captainPortalRouter);
 
