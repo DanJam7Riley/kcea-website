@@ -299,9 +299,11 @@ function ResidentDetailPanel({
         <div className="flex items-center gap-3">
           {statement && (
             <div className="text-right">
-              <p className="text-xs text-muted-foreground uppercase tracking-wide">Balance</p>
+              <p className="text-xs text-muted-foreground uppercase tracking-wide">{statement.totalOutstanding < 0 ? "Credit balance" : "Balance"}</p>
               <p className={`text-lg font-bold ${statement.totalOutstanding > 0 ? "text-red-400" : "text-green-400"}`}>
-                R{statement.totalOutstanding.toLocaleString("en-ZA")}
+                {statement.totalOutstanding < 0
+                  ? `R${Math.abs(statement.totalOutstanding).toLocaleString("en-ZA")} in credit`
+                  : `R${statement.totalOutstanding.toLocaleString("en-ZA")}`}
               </p>
             </div>
           )}
