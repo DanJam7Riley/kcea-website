@@ -2,7 +2,7 @@ import { useState, useRef, useMemo, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Shield, Save, LogIn, AlertTriangle, CheckCircle, Check, Key, Pencil,
-  Trash2, Download, Upload, Users, UserPlus, ClipboardList, BarChart3, Search, MessageSquare, RefreshCw, Phone, ExternalLink, Settings as SettingsIcon, Heart, Mail, X, FileText, Plus, Printer, Landmark, EyeOff, Eye
+  Trash2, Download, Upload, Users, UserPlus, ClipboardList, BarChart3, Search, MessageSquare, RefreshCw, Phone, ExternalLink, Settings as SettingsIcon, Heart, Mail, X, FileText, Plus, Printer, Landmark, EyeOff, Eye, Receipt
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -15,7 +15,7 @@ import { computeStreetStatus, getStreetStatusClass, STREET_OPTIONS } from "@/lib
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 
-const TABS = ["submissions", "stats", "captains", "manage-captains", "incomplete", "captain-mgmt", "pledges", "invoices", "bank-transactions", "settings"] as const;
+const TABS = ["submissions", "stats", "captains", "manage-captains", "incomplete", "captain-mgmt", "pledges", "invoices", "bank-transactions", "expenses", "settings"] as const;
 type Tab = typeof TABS[number];
 
 interface PledgeRow {
@@ -668,6 +668,61 @@ export default function Admin() {
       qc.invalidateQueries({ queryKey: ["pledges"] });
       qc.invalidateQueries({ queryKey: ["pledge-total"] });
     },
+  });
+
+  // ── Expenses ───────────────────────────────────────────────────────
+  // Lightweight tracking (not double-entry bookkeeping) — see expenses.ts.
+  interface ExpenseRow { id: number; expenseDate: string; category: string; amount: number; description: string; reference: string | null; createdBy: string | null }
+  const { data: expensesData, isLoading: expensesLoading } = useQuery<{ expenses: ExpenseRow[]; total: number }>({
+    queryKey: ["expenses"],
+    queryFn: () => fetch(`${BASE}/api/expenses`, { headers: authHeaders }).then(async r => {
+      if (!r.ok) throw new Error("Unauthorized");
+      return r.json();
+    }),
+    enabled: authed && activeTab === "expenses",
+  });
+  const expenses = expensesData?.expenses ?? [];
+
+  const [showAddExpense, setShowAddExpense] = useState(false);
+  const [expenseDate, setExpenseDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [expenseCategory, setExpenseCategory] = useState("");
+  const [expenseAmount, setExpenseAmount] = useState("");
+  const [expenseDescription, setExpenseDescription] = useState("");
+  const [expenseReference, setExpenseReference] = useState("");
+
+  const createExpense = useMutation({
+    mutationFn: () =>
+      fetch(`${BASE}/api/expenses`, {
+        method: "POST",
+        headers: { ...authHeaders, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          expenseDate: new Date(expenseDate).toISOString(),
+          category: expenseCategory,
+          amount: Number(expenseAmount),
+          description: expenseDescription,
+          reference: expenseReference || undefined,
+        }),
+      }).then(async r => {
+        if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error ?? "Failed to record expense");
+        return r.json();
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["expenses"] });
+      setShowAddExpense(false);
+      setExpenseCategory("");
+      setExpenseAmount("");
+      setExpenseDescription("");
+      setExpenseReference("");
+    },
+  });
+
+  const deleteExpense = useMutation({
+    mutationFn: (id: number) =>
+      fetch(`${BASE}/api/expenses/${id}`, { method: "DELETE", headers: authHeaders }).then(async r => {
+        if (!r.ok) throw new Error("Failed to delete expense");
+        return r.json();
+      }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["expenses"] }),
   });
 
   const [invoiceSearch, setInvoiceSearch] = useState("");
@@ -1969,7 +2024,7 @@ export default function Admin() {
         <div className="flex gap-6 items-start">
           {/* Sidebar nav */}
           <nav className="w-56 shrink-0 space-y-1 sticky top-24">
-            {([ ["submissions", ClipboardList, "Residents"], ["stats", BarChart3, "Stats"], ["captains", Users, "Captains"], ["manage-captains", UserPlus, "Manage Captains"], ["incomplete", AlertTriangle, "Incomplete"], ["captain-mgmt", Key, "Captain Portal"], ["pledges", Heart, "Pledges"], ["invoices", FileText, "Invoices"], ["bank-transactions", Landmark, "Bank Transactions"], ["settings", SettingsIcon, "Settings"] ] as const).map(([tab, Icon, label]) => (
+            {([ ["submissions", ClipboardList, "Residents"], ["stats", BarChart3, "Stats"], ["captains", Users, "Captains"], ["manage-captains", UserPlus, "Manage Captains"], ["incomplete", AlertTriangle, "Incomplete"], ["captain-mgmt", Key, "Captain Portal"], ["pledges", Heart, "Pledges"], ["invoices", FileText, "Invoices"], ["bank-transactions", Landmark, "Bank Transactions"], ["expenses", Receipt, "Expenses"], ["settings", SettingsIcon, "Settings"] ] as const).map(([tab, Icon, label]) => (
               <button
                 key={tab}
                 onClick={() => setActiveTab(tab)}
@@ -4349,6 +4404,101 @@ export default function Admin() {
                     {allocatePledgeMutation.isPending ? "Allocating..." : "Allocate to pledge"}
                   </Button>
                 )}
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+        )}
+
+        {/* Expenses Tab */}
+        {activeTab === "expenses" && (
+          <Card className="bg-card border-card-border">
+            <CardHeader className="flex flex-row items-center justify-between gap-4 pb-4 flex-wrap">
+              <div>
+                <CardTitle className="text-xl flex items-center gap-2"><Receipt className="h-5 w-5 text-primary" /> Expenses</CardTitle>
+                <p className="text-xs text-muted-foreground mt-1">
+                  {expenses.length} expense{expenses.length === 1 ? "" : "s"} · Total: <span className="font-bold text-primary">R{(expensesData?.total ?? 0).toLocaleString("en-ZA")}</span>
+                </p>
+              </div>
+              <Button size="sm" className="gap-1.5" onClick={() => setShowAddExpense(true)} data-testid="add-expense-button">
+                <Plus className="h-4 w-4" /> Add expense
+              </Button>
+            </CardHeader>
+            <CardContent>
+              {expensesLoading ? (
+                <p className="text-sm text-muted-foreground">Loading...</p>
+              ) : expenses.length === 0 ? (
+                <p className="text-sm text-muted-foreground py-8 text-center">No expenses recorded yet.</p>
+              ) : (
+                <div className="space-y-2">
+                  {expenses.map(e => (
+                    <div key={e.id} className="rounded-lg border border-card-border p-3 flex items-center justify-between gap-3 flex-wrap" data-testid={`expense-row-${e.id}`}>
+                      <div>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-medium text-sm">{e.description}</span>
+                          <Badge className="bg-red-500/20 text-red-400 border-red-500/20 text-xs" variant="outline">{e.category}</Badge>
+                        </div>
+                        <p className="text-xs text-muted-foreground mt-0.5">
+                          {new Date(e.expenseDate).toLocaleDateString("en-ZA", { day: "2-digit", month: "short", year: "numeric" })}
+                          {e.reference ? ` · ${e.reference}` : ""}
+                          {e.createdBy ? ` · By ${e.createdBy}` : ""}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-3 shrink-0">
+                        <span className="font-semibold text-sm">R{e.amount.toLocaleString("en-ZA")}</span>
+                        <button
+                          onClick={() => { if (confirm(`Delete expense "${e.description}"?`)) deleteExpense.mutate(e.id); }}
+                          className="text-muted-foreground hover:text-red-400 transition-colors p-1 rounded"
+                          title="Delete"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        )}
+
+        {showAddExpense && (
+          <Dialog open={showAddExpense} onOpenChange={setShowAddExpense}>
+            <DialogContent className="max-w-md">
+              <DialogHeader>
+                <DialogTitle>Add expense</DialogTitle>
+              </DialogHeader>
+              <div className="space-y-3">
+                <div className="space-y-1.5">
+                  <Label htmlFor="expense-date">Date</Label>
+                  <Input id="expense-date" type="date" value={expenseDate} onChange={e => setExpenseDate(e.target.value)} />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="expense-category">Category</Label>
+                  <Input id="expense-category" placeholder="e.g. Bank fees, TIS deposit, Application fee" value={expenseCategory} onChange={e => setExpenseCategory(e.target.value)} data-testid="expense-category-input" />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="expense-amount">Amount (R)</Label>
+                  <Input id="expense-amount" type="number" min="1" value={expenseAmount} onChange={e => setExpenseAmount(e.target.value)} data-testid="expense-amount-input" />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="expense-description">Description</Label>
+                  <Input id="expense-description" value={expenseDescription} onChange={e => setExpenseDescription(e.target.value)} data-testid="expense-description-input" />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="expense-reference">Reference (optional)</Label>
+                  <Input id="expense-reference" value={expenseReference} onChange={e => setExpenseReference(e.target.value)} />
+                </div>
+                {createExpense.isError && <p className="text-sm text-red-400">{(createExpense.error as Error).message}</p>}
+              </div>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setShowAddExpense(false)}>Cancel</Button>
+                <Button
+                  disabled={!expenseCategory.trim() || !expenseAmount || Number(expenseAmount) <= 0 || !expenseDescription.trim() || createExpense.isPending}
+                  onClick={() => createExpense.mutate()}
+                  data-testid="submit-add-expense"
+                >
+                  {createExpense.isPending ? "Saving..." : "Add expense"}
+                </Button>
               </DialogFooter>
             </DialogContent>
           </Dialog>
