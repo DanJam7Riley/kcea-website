@@ -130,6 +130,27 @@ router.post("/bank-transactions/import", async (req, res) => {
     const existingPayments = await db.select({ invoiceId: paymentsTable.invoiceId, amount: paymentsTable.amount, paymentDate: paymentsTable.paymentDate }).from(paymentsTable);
     const existingPaymentKeys = new Set(existingPayments.map(p => duplicateKey(p.invoiceId, p.amount, new Date(p.paymentDate))));
 
+    // Running remaining-balance per invoice, tracked live through this
+    // import loop — NOT just a one-time snapshot from before the batch
+    // started. Bug found 2026-08-18: two separate real payments for the
+    // same household in one batch both landed on the household's single
+    // "oldest open invoice" (computed once), overpaying it while a
+    // different invoice for that household never got anything applied.
+    // Now each invoice's remaining balance is decremented as it's used, so
+    // a second payment for the same household correctly rolls forward to
+    // their next invoice with room, instead of stacking on the first one.
+    const paidByInvoice = new Map<number, number>();
+    for (const p of existingPayments) paidByInvoice.set(p.invoiceId, (paidByInvoice.get(p.invoiceId) ?? 0) + p.amount);
+    const remainingByInvoice = new Map<number, number>();
+    for (const list of openInvoicesByCommitment.values()) {
+      for (const inv of list) remainingByInvoice.set(inv.id, inv.total - (paidByInvoice.get(inv.id) ?? 0));
+    }
+
+    function nextInvoiceWithRoom(commitmentId: number): { id: number; invoiceNumber: string; total: number } | null {
+      const list = openInvoicesByCommitment.get(commitmentId) ?? [];
+      return list.find(inv => (remainingByInvoice.get(inv.id) ?? 0) > 0) ?? null;
+    }
+
     let inserted = 0;
     let autoAllocated = 0;
     let skippedDuplicate = 0;
@@ -148,7 +169,7 @@ router.post("/bank-transactions/import", async (req, res) => {
       existingTxKeys.add(txKey);
 
       const match = findMatch(row.description, commitments);
-      const openInvoice = match ? openInvoicesByCommitment.get(match.id)?.[0] ?? null : null;
+      const openInvoice = match ? nextInvoiceWithRoom(match.id) : null;
       const isDuplicatePayment = openInvoice ? existingPaymentKeys.has(duplicateKey(openInvoice.id, row.amount, rowDate)) : false;
 
       if (match && openInvoice && !isDuplicatePayment) {
@@ -167,6 +188,7 @@ router.post("/bank-transactions/import", async (req, res) => {
           .returning();
         touchedInvoiceIds.add(openInvoice.id);
         existingPaymentKeys.add(duplicateKey(openInvoice.id, row.amount, rowDate));
+        remainingByInvoice.set(openInvoice.id, (remainingByInvoice.get(openInvoice.id) ?? 0) - row.amount);
 
         await db.insert(bankTransactionsTable).values({
           transactionDate: rowDate,
