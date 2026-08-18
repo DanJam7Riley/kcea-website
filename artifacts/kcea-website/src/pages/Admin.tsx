@@ -226,9 +226,11 @@ interface ResidentStatementInvoice {
   lineItems: ResidentStatementLineItem[];
   payments: ResidentStatementPayment[];
 }
+interface ResidentStatementCredit { id: number; amount: number; paymentDate: string; method: string; reference: string | null }
 interface ResidentStatement {
   commitment: { id: number; fullName: string; street: string; houseNumber: string; commitmentType: string };
   invoices: ResidentStatementInvoice[];
+  unappliedCredits: ResidentStatementCredit[];
   totalOutstanding: number;
   invoiceCount: number;
 }
@@ -348,10 +350,24 @@ function ResidentDetailPanel({
         {detailTab === "account" && (
           statementLoading ? (
             <p className="text-sm text-muted-foreground py-6 text-center">Loading…</p>
-          ) : !statement || statement.invoices.length === 0 ? (
+          ) : !statement || (statement.invoices.length === 0 && statement.unappliedCredits.length === 0) ? (
             <p className="text-sm text-muted-foreground py-6 text-center">No invoices on file yet.</p>
           ) : (
             <div className="space-y-2">
+              {statement.unappliedCredits.length > 0 && (
+                <div className="rounded-lg border border-green-500/30 bg-green-500/10 p-3 text-sm space-y-1.5">
+                  <p className="text-xs font-semibold text-green-400 uppercase tracking-wide">
+                    Unapplied credit — R{statement.unappliedCredits.reduce((s, c) => s + c.amount, 0).toLocaleString("en-ZA")}
+                  </p>
+                  <p className="text-xs text-muted-foreground">Not yet matched to an invoice — auto-applies when the next one is generated.</p>
+                  {statement.unappliedCredits.map(c => (
+                    <p key={c.id} className="text-xs text-green-400">
+                      R{c.amount.toLocaleString("en-ZA")} · {c.method} · {new Date(c.paymentDate).toLocaleDateString("en-ZA")}
+                      {c.reference ? ` · ${c.reference}` : ""}
+                    </p>
+                  ))}
+                </div>
+              )}
               {[...statement.invoices].reverse().map(inv => (
                 <div key={inv.id} className="rounded-lg border border-border p-3 text-sm">
                   <div className="flex items-center justify-between gap-2 flex-wrap">
@@ -1034,7 +1050,7 @@ export default function Admin() {
   // a contribution toward the project rather than the regular household
   // levy. Added 2026-08-18 after finding real R5,000 payments that didn't
   // fit any single invoice.
-  const [allocateMode, setAllocateMode] = useState<"invoice" | "pledge">("invoice");
+  const [allocateMode, setAllocateMode] = useState<"invoice" | "credit" | "pledge">("invoice");
   const [pledgeSearch, setPledgeSearch] = useState("");
   const [pledgeSelectedId, setPledgeSelectedId] = useState<number | null>(null);
   const [pledgeNewName, setPledgeNewName] = useState("");
@@ -1102,6 +1118,29 @@ export default function Admin() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["bank-transactions"] });
       qc.invalidateQueries({ queryKey: ["invoices"] });
+      setAllocatingTx(null);
+    },
+  });
+
+  // Allocate straight to a household as credit, no invoice needed — for a
+  // confidently-matched payer with nothing open to attach to right now
+  // (their invoices are already paid, or the next one hasn't generated
+  // yet). Shows up as a credit balance on the resident's Account tab
+  // immediately, and auto-applies the next time an invoice is generated
+  // for them (see applyAvailableCredit, api-server/src/routes/invoices.ts).
+  const allocateCreditMutation = useMutation({
+    mutationFn: () =>
+      fetch(`${BASE}/api/bank-transactions/${allocatingTx!.id}/allocate-credit`, {
+        method: "POST",
+        headers: { ...authHeaders, "Content-Type": "application/json" },
+        body: JSON.stringify({ commitmentId: allocateCommitmentId }),
+      }).then(async r => {
+        if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error ?? "Failed to allocate credit");
+        return r.json();
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["bank-transactions"] });
+      qc.invalidateQueries({ queryKey: ["resident-statement"] });
       setAllocatingTx(null);
     },
   });
@@ -4142,9 +4181,14 @@ export default function Admin() {
                           <span className="font-semibold text-sm">R{tx.amount.toLocaleString("en-ZA")}</span>
                         </div>
                         <div className="mt-1">
-                          {tx.status === "allocated" && tx.commitment && (
+                          {tx.status === "allocated" && tx.commitment && tx.invoiceId && (
                             <Badge className="bg-green-500/20 text-green-400 border-green-500/20 text-xs" variant="outline">
                               Allocated — {tx.commitment.fullName} ({tx.commitment.street} {tx.commitment.houseNumber})
+                            </Badge>
+                          )}
+                          {tx.status === "allocated" && tx.commitment && !tx.invoiceId && (
+                            <Badge className="bg-blue-500/20 text-blue-400 border-blue-500/20 text-xs" variant="outline">
+                              Credit — {tx.commitment.fullName} ({tx.commitment.street} {tx.commitment.houseNumber})
                             </Badge>
                           )}
                           {tx.status === "allocated" && tx.pledge && (
@@ -4278,6 +4322,14 @@ export default function Admin() {
                   </button>
                   <button
                     type="button"
+                    className={`px-3 py-1 rounded-md text-xs font-medium ${allocateMode === "credit" ? "bg-primary/15 text-primary" : "text-muted-foreground"}`}
+                    onClick={() => setAllocateMode("credit")}
+                    data-testid="allocate-mode-credit"
+                  >
+                    Household Credit
+                  </button>
+                  <button
+                    type="button"
                     className={`px-3 py-1 rounded-md text-xs font-medium ${allocateMode === "pledge" ? "bg-primary/15 text-primary" : "text-muted-foreground"}`}
                     onClick={() => setAllocateMode("pledge")}
                     data-testid="allocate-mode-pledge"
@@ -4286,7 +4338,42 @@ export default function Admin() {
                   </button>
                 </div>
 
-                {allocateMode === "invoice" ? (
+                {allocateMode === "credit" ? (
+                  <>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="allocate-credit-search">Household</Label>
+                      <Input
+                        id="allocate-credit-search"
+                        placeholder="Search by name or street..."
+                        value={allocateSearch}
+                        onChange={e => { setAllocateSearch(e.target.value); setAllocateCommitmentId(null); }}
+                        data-testid="allocate-credit-search-input"
+                      />
+                      {allocateSearch.trim().length >= 2 && !allocateCommitmentId && (
+                        <div className="max-h-40 overflow-y-auto border border-border rounded-lg">
+                          {allocateMatches.length === 0 ? (
+                            <p className="text-xs text-muted-foreground p-2">No matches</p>
+                          ) : (
+                            allocateMatches.map(c => (
+                              <button
+                                key={c.id}
+                                type="button"
+                                className="w-full text-left px-3 py-1.5 text-sm hover:bg-background/50"
+                                onClick={() => { setAllocateCommitmentId(c.id); setAllocateSearch(`${c.fullName} — ${c.street} ${c.houseNumber}`); }}
+                              >
+                                {c.fullName} — {c.street} {c.houseNumber}
+                              </button>
+                            ))
+                          )}
+                        </div>
+                      )}
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      No invoice needed — shows as a credit on their Account tab immediately, and auto-applies to their next generated invoice.
+                    </p>
+                    {allocateCreditMutation.isError && <p className="text-sm text-red-400">{(allocateCreditMutation.error as Error).message}</p>}
+                  </>
+                ) : allocateMode === "invoice" ? (
                   <>
                     <div className="space-y-1.5">
                       <Label htmlFor="allocate-search">Household</Label>
@@ -4396,6 +4483,14 @@ export default function Admin() {
                     data-testid="submit-allocate"
                   >
                     {allocateMutation.isPending ? "Allocating..." : "Allocate"}
+                  </Button>
+                ) : allocateMode === "credit" ? (
+                  <Button
+                    disabled={!allocateCommitmentId || allocateCreditMutation.isPending}
+                    onClick={() => allocateCreditMutation.mutate()}
+                    data-testid="submit-allocate-credit"
+                  >
+                    {allocateCreditMutation.isPending ? "Allocating..." : "Allocate as credit"}
                   </Button>
                 ) : (
                   <Button

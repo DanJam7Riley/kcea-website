@@ -160,7 +160,11 @@ router.post("/bank-transactions/import", async (req, res) => {
     // switching from that flow to this one doesn't double-count history).
     const existingTx = await db.select({ transactionDate: bankTransactionsTable.transactionDate, description: bankTransactionsTable.description, amount: bankTransactionsTable.amount }).from(bankTransactionsTable);
     const existingTxKeys = new Set(existingTx.map(t => transactionDedupeKey(new Date(t.transactionDate), t.description, t.amount)));
-    const existingPayments = await db.select({ invoiceId: paymentsTable.invoiceId, amount: paymentsTable.amount, paymentDate: paymentsTable.paymentDate }).from(paymentsTable);
+    // Credit payments (invoiceId null — see the payments table comment) aren't
+    // tied to an invoice, so they're irrelevant to per-invoice duplicate
+    // detection and remaining-balance tracking below.
+    const existingPaymentsRaw = await db.select({ invoiceId: paymentsTable.invoiceId, amount: paymentsTable.amount, paymentDate: paymentsTable.paymentDate }).from(paymentsTable);
+    const existingPayments = existingPaymentsRaw.filter((p): p is typeof p & { invoiceId: number } => p.invoiceId !== null);
     const existingPaymentKeys = new Set(existingPayments.map(p => duplicateKey(p.invoiceId, p.amount, new Date(p.paymentDate))));
 
     // Running remaining-balance per invoice, tracked live through this
@@ -346,6 +350,82 @@ router.post("/bank-transactions/:id/allocate", async (req, res) => {
   } catch (err) {
     req.log.error(err);
     res.status(500).json({ error: "Failed to allocate transaction" });
+  }
+});
+
+// Allocate a transaction directly to a household as credit — admin only.
+// For a confidently-matched payer with no open invoice to attach to right
+// now (the majority of the 2026-08-18 "155 unallocated" investigation:
+// their invoices were already paid, or a new one hasn't been generated
+// yet). Body: { commitmentId, amount?, paymentDate?, method?, reference? }.
+// Creates a payment with invoiceId left null and commitmentId set — shows
+// up immediately as a credit balance on the household's resident detail
+// page / public statement (see statement.ts), and auto-applies to the next
+// invoice generated for them (see applyAvailableCredit in invoices.ts)
+// instead of needing an admin to notice and reassign it by hand.
+router.post("/bank-transactions/:id/allocate-credit", async (req, res) => {
+  if (!isAdminReq(req.headers)) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+  const id = parseInt(req.params.id, 10);
+  if (isNaN(id)) {
+    res.status(400).json({ error: "Invalid id" });
+    return;
+  }
+  const body = req.body as Record<string, unknown>;
+  const commitmentId = typeof body.commitmentId === "number" && Number.isInteger(body.commitmentId) ? body.commitmentId : null;
+  if (!commitmentId) {
+    res.status(400).json({ error: "commitmentId is required" });
+    return;
+  }
+
+  try {
+    const [tx] = await db.select().from(bankTransactionsTable).where(eq(bankTransactionsTable.id, id));
+    if (!tx) {
+      res.status(404).json({ error: "Not found" });
+      return;
+    }
+    if (tx.status === "allocated") {
+      res.status(409).json({ error: "Already allocated" });
+      return;
+    }
+    const [commitment] = await db.select({ id: commitmentsTable.id }).from(commitmentsTable).where(eq(commitmentsTable.id, commitmentId));
+    if (!commitment) {
+      res.status(400).json({ error: "Household not found" });
+      return;
+    }
+
+    const amount = typeof body.amount === "number" && body.amount > 0 ? Math.round(body.amount) : tx.amount;
+    const paymentDate = typeof body.paymentDate === "string" && body.paymentDate ? new Date(body.paymentDate) : new Date(tx.transactionDate);
+    const method = typeof body.method === "string" && body.method.trim() ? body.method.trim() : "EFT";
+    const reference = typeof body.reference === "string" ? body.reference.trim() || null : tx.description.slice(0, 500);
+
+    const [payment] = await db
+      .insert(paymentsTable)
+      .values({
+        invoiceId: null,
+        commitmentId,
+        amount,
+        paymentDate: isNaN(paymentDate.getTime()) ? new Date() : paymentDate,
+        method,
+        reference,
+        source: "bank_import",
+        recordedBy: adminUsername(req),
+      })
+      .returning();
+
+    const [updated] = await db
+      .update(bankTransactionsTable)
+      .set({ status: "allocated", commitmentId, invoiceId: null, paymentId: payment.id })
+      .where(eq(bankTransactionsTable.id, id))
+      .returning();
+
+    await rememberPayerReference(tx.description, commitmentId, adminUsername(req));
+    res.json({ transaction: updated, payment });
+  } catch (err) {
+    req.log.error(err);
+    res.status(500).json({ error: "Failed to allocate transaction to household credit" });
   }
 });
 
