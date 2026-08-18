@@ -570,6 +570,34 @@ export default function Admin() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["invoices"] }),
   });
 
+  // Reassign a payment to a different invoice for the same household — for
+  // correcting a real payment that landed on the wrong invoice (found
+  // 2026-08-18: batch imports before the invoice-rollover fix could stack
+  // two real payments on one invoice, or a lump-sum prepayment could
+  // overpay a single small invoice). Keeps the payment's amount/date/audit
+  // trail — only moves which invoice it counts against.
+  const [reassigningPayment, setReassigningPayment] = useState<{ id: number; amount: number; currentInvoiceId: number; commitmentId: number | null } | null>(null);
+  const [reassignTargetInvoiceId, setReassignTargetInvoiceId] = useState<number | null>(null);
+  const reassignCandidates = reassigningPayment
+    ? invoices.filter(i => i.commitmentId === reassigningPayment.commitmentId && i.id !== reassigningPayment.currentInvoiceId)
+    : [];
+  const reassignPayment = useMutation({
+    mutationFn: () =>
+      fetch(`${BASE}/api/payments/${reassigningPayment!.id}/reassign`, {
+        method: "PUT",
+        headers: { ...authHeaders, "Content-Type": "application/json" },
+        body: JSON.stringify({ invoiceId: reassignTargetInvoiceId }),
+      }).then(async r => {
+        if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error ?? "Failed to reassign payment");
+        return r.json();
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["invoices"] });
+      setReassigningPayment(null);
+      setReassignTargetInvoiceId(null);
+    },
+  });
+
   // ── Multi-month invoice ──────────────────────────────────────────
   // For a household paying several months up front in one invoice (e.g. a
   // resident asking for a 6-month invoice) instead of the normal monthly cycle.
@@ -592,78 +620,6 @@ export default function Admin() {
       setShowMultiMonth(false);
       setMultiMonthCommitmentId("");
       setMultiMonthCount(6);
-    },
-  });
-
-  // ── Bank statement CSV import ─────────────────────────────────────
-  interface BankMatchRow {
-    rowIndex: number;
-    date: string | null;
-    description: string;
-    amount: number | null;
-    candidate: {
-      commitmentId: number;
-      fullName: string;
-      street: string;
-      houseNumber: string;
-      invoiceId: number | null;
-      invoiceNumber: string | null;
-      balanceDue: number | null;
-      possibleDuplicate: boolean;
-    };
-  }
-  interface BankImportPreview {
-    totalRows: number;
-    creditRows: number;
-    matchedCount: number;
-    needsReviewCount: number;
-    matched: BankMatchRow[];
-    needsReview: { rowIndex: number; date: string | null; description: string; amount: number | null }[];
-  }
-  const [showBankImport, setShowBankImport] = useState(false);
-  const [bankImportCsvText, setBankImportCsvText] = useState("");
-  const [bankImportPreview, setBankImportPreview] = useState<BankImportPreview | null>(null);
-  const [bankImportExcluded, setBankImportExcluded] = useState<Set<number>>(new Set());
-  const [bankImportResult, setBankImportResult] = useState<{ createdCount: number; skippedCount: number } | null>(null);
-
-  const bankImportPreviewMutation = useMutation({
-    mutationFn: () =>
-      fetch(`${BASE}/api/payments/import-preview`, {
-        method: "POST",
-        headers: { ...authHeaders, "Content-Type": "application/json" },
-        body: JSON.stringify({ csv: bankImportCsvText }),
-      }).then(async r => {
-        if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error ?? "Failed to parse statement");
-        return r.json() as Promise<BankImportPreview>;
-      }),
-    onSuccess: data => {
-      setBankImportPreview(data);
-      // Likely-duplicate rows (same invoice/amount/date as an already-recorded
-      // payment — e.g. re-importing a statement that overlaps a previous
-      // import) start unchecked, so a re-run doesn't silently double-count
-      // real payments unless the admin deliberately re-checks them.
-      setBankImportExcluded(new Set(data.matched.filter(r => r.candidate.possibleDuplicate).map(r => r.rowIndex)));
-      setBankImportResult(null);
-    },
-  });
-
-  const bankImportConfirmMutation = useMutation({
-    mutationFn: () => {
-      const rows = (bankImportPreview?.matched ?? [])
-        .filter(r => r.candidate.invoiceId && !bankImportExcluded.has(r.rowIndex))
-        .map(r => ({ invoiceId: r.candidate.invoiceId, amount: r.amount, date: r.date ?? undefined, description: r.description }));
-      return fetch(`${BASE}/api/payments/import-confirm`, {
-        method: "POST",
-        headers: { ...authHeaders, "Content-Type": "application/json" },
-        body: JSON.stringify({ rows }),
-      }).then(async r => {
-        if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error ?? "Failed to confirm import");
-        return r.json();
-      });
-    },
-    onSuccess: data => {
-      qc.invalidateQueries({ queryKey: ["invoices"] });
-      setBankImportResult(data);
     },
   });
 
@@ -3014,9 +2970,6 @@ export default function Admin() {
                 <Button size="sm" variant="outline" className="gap-1.5" onClick={() => setShowMultiMonth(true)} data-testid="multi-month-invoice-button">
                   <FileText className="h-4 w-4" /> Multi-month invoice
                 </Button>
-                <Button size="sm" variant="outline" className="gap-1.5" onClick={() => { setShowBankImport(true); setBankImportCsvText(""); setBankImportPreview(null); setBankImportResult(null); }} data-testid="bank-import-button">
-                  <Upload className="h-4 w-4" /> Import bank statement
-                </Button>
                 <Button size="sm" variant="outline" className="gap-1.5" onClick={openSendAllDialog} data-testid="send-all-invoices-button">
                   <Mail className="h-4 w-4" /> Email all
                 </Button>
@@ -3099,6 +3052,17 @@ export default function Admin() {
                                     R{p.amount.toLocaleString("en-ZA")} · {p.method} · {new Date(p.paymentDate).toLocaleDateString("en-ZA")}
                                     {p.reference ? ` · ${p.reference}` : ""}
                                   </span>
+                                  <button
+                                    type="button"
+                                    className="text-primary hover:underline disabled:opacity-50"
+                                    onClick={() => {
+                                      setReassigningPayment({ id: p.id, amount: p.amount, currentInvoiceId: inv.id, commitmentId: inv.commitmentId });
+                                      setReassignTargetInvoiceId(null);
+                                    }}
+                                    data-testid={`reassign-payment-${p.id}`}
+                                  >
+                                    Reassign
+                                  </button>
                                   <button
                                     type="button"
                                     className="text-red-400 hover:underline disabled:opacity-50"
@@ -3657,6 +3621,52 @@ export default function Admin() {
           </Dialog>
         )}
 
+        {reassigningPayment && (
+          <Dialog open={!!reassigningPayment} onOpenChange={open => !open && setReassigningPayment(null)}>
+            <DialogContent className="max-w-md">
+              <DialogHeader>
+                <DialogTitle>Reassign payment — R{reassigningPayment.amount.toLocaleString("en-ZA")}</DialogTitle>
+              </DialogHeader>
+              <div className="space-y-3">
+                <p className="text-sm text-muted-foreground">
+                  Moves this payment to a different invoice for the same household. The amount, date, and reference stay the same — only which invoice it counts against changes.
+                </p>
+                <div className="space-y-1.5">
+                  <Label htmlFor="reassign-invoice">Move to invoice</Label>
+                  <select
+                    id="reassign-invoice"
+                    className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                    value={reassignTargetInvoiceId ?? ""}
+                    onChange={e => setReassignTargetInvoiceId(e.target.value ? Number(e.target.value) : null)}
+                    data-testid="reassign-invoice-select"
+                  >
+                    <option value="">Select an invoice...</option>
+                    {reassignCandidates.map(inv => (
+                      <option key={inv.id} value={inv.id}>
+                        {inv.invoiceNumber} — R{inv.total.toLocaleString("en-ZA")} ({inv.status}){!!inv.amountPaid && `, paid R${inv.amountPaid.toLocaleString("en-ZA")}`}
+                      </option>
+                    ))}
+                  </select>
+                  {reassignCandidates.length === 0 && (
+                    <p className="text-xs text-amber-400">This household has no other invoice yet — generate one first (e.g. Multi-month invoice) if this payment covers a different month.</p>
+                  )}
+                </div>
+                {reassignPayment.isError && <p className="text-sm text-red-400">{(reassignPayment.error as Error).message}</p>}
+              </div>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setReassigningPayment(null)}>Cancel</Button>
+                <Button
+                  disabled={!reassignTargetInvoiceId || reassignPayment.isPending}
+                  onClick={() => reassignPayment.mutate()}
+                  data-testid="submit-reassign-payment"
+                >
+                  {reassignPayment.isPending ? "Reassigning..." : "Reassign"}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+        )}
+
         {showMultiMonth && (
           <Dialog open={showMultiMonth} onOpenChange={setShowMultiMonth}>
             <DialogContent className="max-w-md">
@@ -3702,132 +3712,6 @@ export default function Admin() {
                 >
                   {multiMonthGenerate.isPending ? "Generating..." : "Generate invoice"}
                 </Button>
-              </DialogFooter>
-            </DialogContent>
-          </Dialog>
-        )}
-
-        {showBankImport && (
-          <Dialog open={showBankImport} onOpenChange={setShowBankImport}>
-            <DialogContent className="max-w-3xl">
-              <DialogHeader>
-                <DialogTitle>Import bank statement (CSV)</DialogTitle>
-              </DialogHeader>
-              <div className="space-y-3">
-                <p className="text-sm text-muted-foreground">
-                  Upload or paste an FNB CSV export below. Rows are matched to a household by street + house number found in the description, then to that household's oldest open invoice. Review before confirming — nothing is recorded until you click "Record matched payments".
-                </p>
-                {!bankImportPreview && (
-                  <>
-                    <div className="flex items-center gap-3">
-                      <input
-                        type="file"
-                        accept=".csv,text/csv,text/plain"
-                        onChange={async e => {
-                          const file = e.target.files?.[0];
-                          if (!file) return;
-                          const text = await file.text();
-                          setBankImportCsvText(text);
-                          e.target.value = "";
-                        }}
-                        className="text-xs file:mr-3 file:rounded-md file:border file:border-input file:bg-background file:px-3 file:py-1.5 file:text-xs file:cursor-pointer"
-                        data-testid="bank-import-file-input"
-                      />
-                      {bankImportCsvText && (
-                        <span className="text-xs text-muted-foreground">
-                          {bankImportCsvText.trim().split("\n").length} lines loaded
-                        </span>
-                      )}
-                    </div>
-                    <p className="text-xs text-muted-foreground">— or paste it directly —</p>
-                    <textarea
-                      className="w-full h-40 rounded-md border border-input bg-background px-3 py-2 text-xs font-mono"
-                      placeholder="Date,Description,Amount&#10;2026-08-01,EFT Derby 12,250&#10;..."
-                      value={bankImportCsvText}
-                      onChange={e => setBankImportCsvText(e.target.value)}
-                      data-testid="bank-import-csv-input"
-                    />
-                    {bankImportPreviewMutation.isError && (
-                      <p className="text-sm text-red-400">{(bankImportPreviewMutation.error as Error).message}</p>
-                    )}
-                  </>
-                )}
-                {bankImportPreview && !bankImportResult && (
-                  <>
-                    <div className="flex gap-4 text-xs text-muted-foreground">
-                      <span>{bankImportPreview.creditRows} credit rows</span>
-                      <span className="text-green-400">{bankImportPreview.matchedCount} matched</span>
-                      <span className="text-amber-400">{bankImportPreview.needsReviewCount} needs review</span>
-                    </div>
-                    <div className="max-h-72 overflow-y-auto space-y-1 border border-border rounded-lg p-2">
-                      {bankImportPreview.matched.map(r => (
-                        <label key={r.rowIndex} className="flex items-center gap-3 px-2 py-1.5 rounded-md hover:bg-background/50 cursor-pointer text-xs">
-                          <input
-                            type="checkbox"
-                            checked={!bankImportExcluded.has(r.rowIndex)}
-                            onChange={() => setBankImportExcluded(prev => {
-                              const next = new Set(prev);
-                              if (next.has(r.rowIndex)) next.delete(r.rowIndex); else next.add(r.rowIndex);
-                              return next;
-                            })}
-                          />
-                          <span className="flex-1 truncate">{r.candidate.fullName} — {r.candidate.street} {r.candidate.houseNumber}</span>
-                          <span className="text-muted-foreground truncate max-w-[160px]">{r.description}</span>
-                          <span className="font-semibold">R{(r.amount ?? 0).toLocaleString("en-ZA")}</span>
-                          {!r.candidate.invoiceId && <span className="text-red-400">no open invoice</span>}
-                          {r.candidate.possibleDuplicate && (
-                            <span className="text-amber-400" title="A payment for this invoice, amount, and date already exists — probably already recorded from an earlier import">
-                              possible duplicate
-                            </span>
-                          )}
-                        </label>
-                      ))}
-                    </div>
-                    {bankImportPreview.needsReviewCount > 0 && (
-                      <details className="text-xs text-muted-foreground">
-                        <summary className="cursor-pointer">Needs review ({bankImportPreview.needsReviewCount}) — no household match found, not imported</summary>
-                        <div className="mt-2 space-y-1 max-h-40 overflow-y-auto">
-                          {bankImportPreview.needsReview.map(r => (
-                            <div key={r.rowIndex} className="flex justify-between">
-                              <span className="truncate">{r.description}</span>
-                              <span>R{(r.amount ?? 0).toLocaleString("en-ZA")}</span>
-                            </div>
-                          ))}
-                        </div>
-                      </details>
-                    )}
-                    {bankImportConfirmMutation.isError && (
-                      <p className="text-sm text-red-400">{(bankImportConfirmMutation.error as Error).message}</p>
-                    )}
-                  </>
-                )}
-                {bankImportResult && (
-                  <p className="text-sm text-green-400">
-                    Recorded {bankImportResult.createdCount} payment{bankImportResult.createdCount === 1 ? "" : "s"}
-                    {bankImportResult.skippedCount > 0 ? ` (${bankImportResult.skippedCount} skipped)` : ""}.
-                  </p>
-                )}
-              </div>
-              <DialogFooter>
-                <Button variant="outline" onClick={() => setShowBankImport(false)}>Close</Button>
-                {!bankImportPreview && (
-                  <Button
-                    disabled={!bankImportCsvText.trim() || bankImportPreviewMutation.isPending}
-                    onClick={() => bankImportPreviewMutation.mutate()}
-                    data-testid="submit-bank-import-preview"
-                  >
-                    {bankImportPreviewMutation.isPending ? "Parsing..." : "Preview matches"}
-                  </Button>
-                )}
-                {bankImportPreview && !bankImportResult && (
-                  <Button
-                    disabled={bankImportConfirmMutation.isPending || bankImportPreview.matched.every(r => bankImportExcluded.has(r.rowIndex) || !r.candidate.invoiceId)}
-                    onClick={() => bankImportConfirmMutation.mutate()}
-                    data-testid="submit-bank-import-confirm"
-                  >
-                    {bankImportConfirmMutation.isPending ? "Recording..." : "Record matched payments"}
-                  </Button>
-                )}
               </DialogFooter>
             </DialogContent>
           </Dialog>
