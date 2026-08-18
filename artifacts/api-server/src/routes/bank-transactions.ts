@@ -171,8 +171,17 @@ router.post("/bank-transactions/import", async (req, res) => {
       const match = findMatch(row.description, commitments);
       const openInvoice = match ? nextInvoiceWithRoom(match.id) : null;
       const isDuplicatePayment = openInvoice ? existingPaymentKeys.has(duplicateKey(openInvoice.id, row.amount, rowDate)) : false;
+      // A payment larger than what the matched invoice actually still owes
+      // is very likely a multi-month lump-sum prepayment (confirmed
+      // 2026-08-18 against real production data: e.g. one real R5,000
+      // transaction fully overpaying a R250 invoice by 20x) — auto-applying
+      // the whole amount to one small invoice is wrong. Leave it
+      // unallocated with the suggestion pre-filled so an admin decides how
+      // many months it actually covers (e.g. via "Multi-month invoice")
+      // before allocating it, rather than guessing.
+      const fitsInvoice = openInvoice ? row.amount <= (remainingByInvoice.get(openInvoice.id) ?? 0) : false;
 
-      if (match && openInvoice && !isDuplicatePayment) {
+      if (match && openInvoice && !isDuplicatePayment && fitsInvoice) {
         // Confident match with an open invoice to attach to — auto-allocate.
         const [payment] = await db
           .insert(paymentsTable)

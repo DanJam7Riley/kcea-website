@@ -570,6 +570,34 @@ export default function Admin() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["invoices"] }),
   });
 
+  // Reassign a payment to a different invoice for the same household — for
+  // correcting a real payment that landed on the wrong invoice (found
+  // 2026-08-18: batch imports before the invoice-rollover fix could stack
+  // two real payments on one invoice, or a lump-sum prepayment could
+  // overpay a single small invoice). Keeps the payment's amount/date/audit
+  // trail — only moves which invoice it counts against.
+  const [reassigningPayment, setReassigningPayment] = useState<{ id: number; amount: number; currentInvoiceId: number; commitmentId: number | null } | null>(null);
+  const [reassignTargetInvoiceId, setReassignTargetInvoiceId] = useState<number | null>(null);
+  const reassignCandidates = reassigningPayment
+    ? invoices.filter(i => i.commitmentId === reassigningPayment.commitmentId && i.id !== reassigningPayment.currentInvoiceId)
+    : [];
+  const reassignPayment = useMutation({
+    mutationFn: () =>
+      fetch(`${BASE}/api/payments/${reassigningPayment!.id}/reassign`, {
+        method: "PUT",
+        headers: { ...authHeaders, "Content-Type": "application/json" },
+        body: JSON.stringify({ invoiceId: reassignTargetInvoiceId }),
+      }).then(async r => {
+        if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error ?? "Failed to reassign payment");
+        return r.json();
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["invoices"] });
+      setReassigningPayment(null);
+      setReassignTargetInvoiceId(null);
+    },
+  });
+
   // ── Multi-month invoice ──────────────────────────────────────────
   // For a household paying several months up front in one invoice (e.g. a
   // resident asking for a 6-month invoice) instead of the normal monthly cycle.
@@ -3026,6 +3054,17 @@ export default function Admin() {
                                   </span>
                                   <button
                                     type="button"
+                                    className="text-primary hover:underline disabled:opacity-50"
+                                    onClick={() => {
+                                      setReassigningPayment({ id: p.id, amount: p.amount, currentInvoiceId: inv.id, commitmentId: inv.commitmentId });
+                                      setReassignTargetInvoiceId(null);
+                                    }}
+                                    data-testid={`reassign-payment-${p.id}`}
+                                  >
+                                    Reassign
+                                  </button>
+                                  <button
+                                    type="button"
                                     className="text-red-400 hover:underline disabled:opacity-50"
                                     disabled={deletePayment.isPending}
                                     onClick={() => {
@@ -3576,6 +3615,52 @@ export default function Admin() {
                   data-testid="submit-record-payment"
                 >
                   {recordPayment.isPending ? "Recording..." : "Record payment"}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+        )}
+
+        {reassigningPayment && (
+          <Dialog open={!!reassigningPayment} onOpenChange={open => !open && setReassigningPayment(null)}>
+            <DialogContent className="max-w-md">
+              <DialogHeader>
+                <DialogTitle>Reassign payment — R{reassigningPayment.amount.toLocaleString("en-ZA")}</DialogTitle>
+              </DialogHeader>
+              <div className="space-y-3">
+                <p className="text-sm text-muted-foreground">
+                  Moves this payment to a different invoice for the same household. The amount, date, and reference stay the same — only which invoice it counts against changes.
+                </p>
+                <div className="space-y-1.5">
+                  <Label htmlFor="reassign-invoice">Move to invoice</Label>
+                  <select
+                    id="reassign-invoice"
+                    className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                    value={reassignTargetInvoiceId ?? ""}
+                    onChange={e => setReassignTargetInvoiceId(e.target.value ? Number(e.target.value) : null)}
+                    data-testid="reassign-invoice-select"
+                  >
+                    <option value="">Select an invoice...</option>
+                    {reassignCandidates.map(inv => (
+                      <option key={inv.id} value={inv.id}>
+                        {inv.invoiceNumber} — R{inv.total.toLocaleString("en-ZA")} ({inv.status}){!!inv.amountPaid && `, paid R${inv.amountPaid.toLocaleString("en-ZA")}`}
+                      </option>
+                    ))}
+                  </select>
+                  {reassignCandidates.length === 0 && (
+                    <p className="text-xs text-amber-400">This household has no other invoice yet — generate one first (e.g. Multi-month invoice) if this payment covers a different month.</p>
+                  )}
+                </div>
+                {reassignPayment.isError && <p className="text-sm text-red-400">{(reassignPayment.error as Error).message}</p>}
+              </div>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setReassigningPayment(null)}>Cancel</Button>
+                <Button
+                  disabled={!reassignTargetInvoiceId || reassignPayment.isPending}
+                  onClick={() => reassignPayment.mutate()}
+                  data-testid="submit-reassign-payment"
+                >
+                  {reassignPayment.isPending ? "Reassigning..." : "Reassign"}
                 </Button>
               </DialogFooter>
             </DialogContent>

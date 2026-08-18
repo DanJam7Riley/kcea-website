@@ -94,6 +94,56 @@ router.delete("/payments/:id", async (req, res) => {
   }
 });
 
+// Reassign a payment to a different invoice — admin only. Body: { invoiceId }.
+// For correcting a real, legitimate payment that got attached to the wrong
+// invoice (e.g. a household's second real payment in a batch landed on the
+// same invoice as their first, before the invoice-rollover fix; or a large
+// lump-sum prepayment needs splitting across newly-created monthly
+// invoices). Keeps the payment's amount/date/reference/audit trail intact —
+// only moves which invoice it's counted against. Recomputes status on both
+// the old and new invoice.
+router.put("/payments/:id/reassign", async (req, res) => {
+  if (!isAdminReq(req.headers)) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+  const id = parseInt(req.params.id, 10);
+  if (isNaN(id)) {
+    res.status(400).json({ error: "Invalid id" });
+    return;
+  }
+  const body = req.body as Record<string, unknown>;
+  const newInvoiceId = typeof body.invoiceId === "number" && Number.isInteger(body.invoiceId) ? body.invoiceId : null;
+  if (!newInvoiceId) {
+    res.status(400).json({ error: "invoiceId is required" });
+    return;
+  }
+  try {
+    const [payment] = await db.select().from(paymentsTable).where(eq(paymentsTable.id, id));
+    if (!payment) {
+      res.status(404).json({ error: "Payment not found" });
+      return;
+    }
+    const [newInvoice] = await db.select({ id: invoicesTable.id }).from(invoicesTable).where(eq(invoicesTable.id, newInvoiceId));
+    if (!newInvoice) {
+      res.status(400).json({ error: "Target invoice not found" });
+      return;
+    }
+    const oldInvoiceId = payment.invoiceId;
+    if (oldInvoiceId === newInvoiceId) {
+      res.status(400).json({ error: "Payment is already on that invoice" });
+      return;
+    }
+    const [updated] = await db.update(paymentsTable).set({ invoiceId: newInvoiceId }).where(eq(paymentsTable.id, id)).returning();
+    await recomputeInvoiceStatus(oldInvoiceId);
+    await recomputeInvoiceStatus(newInvoiceId);
+    res.json({ payment: updated });
+  } catch (err) {
+    req.log.error(err);
+    res.status(500).json({ error: "Failed to reassign payment" });
+  }
+});
+
 // ── Bank statement CSV import ────────────────────────────────────────────
 
 export interface ParsedRow {
