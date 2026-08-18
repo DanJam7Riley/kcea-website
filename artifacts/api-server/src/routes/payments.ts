@@ -216,8 +216,15 @@ interface MatchCandidate {
 // number). Strip the common street-type suffix word before matching so the
 // core name ("highland") is what's actually searched for.
 const STREET_SUFFIXES = ["road", "street", "rd", "st", "drive", "dr", "avenue", "ave", "close", "court", "lane", "crescent"];
+// Also strips apostrophes (straight/curly) so a street stored as "Earls
+// Court" still matches a bank description reading "Earl's Court" — found
+// 2026-08-14 against a real FNB export ("FNB APP PAYMENT FROM VITO 18
+// EARL'S COURT" wasn't matching "Earls Court" for exactly this reason).
+function normalizeForMatch(s: string): string {
+  return s.toLowerCase().replace(/['’]/g, "").trim();
+}
 function coreStreetName(street: string): string {
-  const words = street.toLowerCase().trim().split(/\s+/);
+  const words = normalizeForMatch(street).split(/\s+/);
   while (words.length > 1 && STREET_SUFFIXES.includes(words[words.length - 1])) {
     words.pop();
   }
@@ -228,7 +235,7 @@ export function findMatch(
   description: string,
   commitments: { id: number; fullName: string; street: string; houseNumber: string }[],
 ): { id: number; fullName: string; street: string; houseNumber: string } | null {
-  const desc = description.toLowerCase();
+  const desc = normalizeForMatch(description);
   let best: { id: number; fullName: string; street: string; houseNumber: string } | null = null;
   let bestLen = 0;
   for (const c of commitments) {
