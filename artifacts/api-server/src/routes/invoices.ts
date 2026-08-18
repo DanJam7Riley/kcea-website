@@ -44,6 +44,36 @@ export async function recomputeInvoiceStatus(invoiceId: number): Promise<void> {
   }
 }
 
+// A household can have "credit" payments sitting unapplied — money an admin
+// allocated directly to a resident (via the bank transactions ledger) when
+// there was no open invoice to attach it to yet (invoiceId null,
+// commitmentId set — see the payments table comment). Call this right after
+// creating any new invoice so waiting credit connects to it automatically
+// instead of needing an admin to notice and reassign it by hand every time.
+// Applies oldest-first, and only ever applies a credit that fits within what
+// the invoice still needs — same "never overpay a single invoice by
+// guessing" rule as the bank-import auto-allocate logic (bank-transactions.ts).
+async function applyAvailableCredit(commitmentId: number | null, invoiceId: number, invoiceTotal: number): Promise<void> {
+  if (!commitmentId) return;
+  const credits = await db
+    .select()
+    .from(paymentsTable)
+    .where(and(eq(paymentsTable.commitmentId, commitmentId), isNull(paymentsTable.invoiceId)));
+  credits.sort((a, b) => new Date(a.paymentDate).getTime() - new Date(b.paymentDate).getTime());
+
+  let remaining = invoiceTotal;
+  let applied = false;
+  for (const credit of credits) {
+    if (remaining <= 0) break;
+    if (credit.amount <= remaining) {
+      await db.update(paymentsTable).set({ invoiceId }).where(eq(paymentsTable.id, credit.id));
+      remaining -= credit.amount;
+      applied = true;
+    }
+  }
+  if (applied) await recomputeInvoiceStatus(invoiceId);
+}
+
 // Digital sign-off: record which admin login created/actioned the invoice.
 // No physical signature field — matches KCEA's own instruction that this is a
 // digital-only process for now.
@@ -105,10 +135,14 @@ router.get("/invoices", async (req, res) => {
     // can show balances and offer an "Undo" per payment without a separate
     // fetch per row. Fetched in one query and aggregated in JS — simpler
     // than a SQL join here and fine at KCEA's invoice volume.
+    // Credit payments (invoiceId null — allocated straight to a household,
+    // not yet applied to an invoice; see the payments table comment) are
+    // irrelevant to this per-invoice list, skip them.
     const allPayments = await db.select().from(paymentsTable).orderBy(desc(paymentsTable.paymentDate));
     const paidByInvoice = new Map<number, number>();
     const paymentsByInvoice = new Map<number, typeof allPayments>();
     for (const p of allPayments) {
+      if (p.invoiceId === null) continue;
       paidByInvoice.set(p.invoiceId, (paidByInvoice.get(p.invoiceId) ?? 0) + p.amount);
       const list = paymentsByInvoice.get(p.invoiceId) ?? [];
       list.push(p);
@@ -348,6 +382,7 @@ router.post("/invoices/onceoff-generate", async (req, res) => {
         unitAmount: ONCEOFF_AMOUNT,
         amount: ONCEOFF_AMOUNT,
       });
+      await applyAvailableCredit(commitmentId, invoice.id, invoice.total);
 
       created.push(invoiceNumber);
     }
@@ -445,9 +480,11 @@ router.post("/invoices/multi-month", async (req, res) => {
       return { invoiceId: invoice.id, description: `Monthly household contribution — ${label}`, quantity: 1, unitAmount: rate, amount: rate };
     });
     await db.insert(invoiceLineItemsTable).values(lineItems);
+    await applyAvailableCredit(commitmentId, invoice.id, invoice.total);
 
     const savedItems = await db.select().from(invoiceLineItemsTable).where(eq(invoiceLineItemsTable.invoiceId, invoice.id));
-    res.status(201).json({ ...invoice, lineItems: savedItems });
+    const [updatedInvoice] = await db.select().from(invoicesTable).where(eq(invoicesTable.id, invoice.id));
+    res.status(201).json({ ...updatedInvoice, lineItems: savedItems });
   } catch (err) {
     req.log.error(err);
     res.status(500).json({ error: "Failed to generate multi-month invoice" });
@@ -830,9 +867,11 @@ router.post("/invoices", async (req, res) => {
       .returning();
 
     await db.insert(invoiceLineItemsTable).values(items.map(i => ({ ...i, invoiceId: invoice.id })));
+    await applyAvailableCredit(commitmentId, invoice.id, invoice.total);
 
     const savedItems = await db.select().from(invoiceLineItemsTable).where(eq(invoiceLineItemsTable.invoiceId, invoice.id));
-    res.status(201).json({ ...invoice, lineItems: savedItems });
+    const [updatedInvoice] = await db.select().from(invoicesTable).where(eq(invoicesTable.id, invoice.id));
+    res.status(201).json({ ...updatedInvoice, lineItems: savedItems });
   } catch (err) {
     req.log.error(err);
     res.status(500).json({ error: "Failed to create invoice" });
@@ -920,6 +959,7 @@ router.post("/invoices/bulk-generate", async (req, res) => {
         unitAmount: rate,
         amount: rate,
       });
+      await applyAvailableCredit(commitmentId, invoice.id, invoice.total);
 
       created.push(invoiceNumber);
     }

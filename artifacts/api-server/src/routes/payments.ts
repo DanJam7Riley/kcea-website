@@ -86,7 +86,7 @@ router.delete("/payments/:id", async (req, res) => {
       res.status(404).json({ error: "Not found" });
       return;
     }
-    await recomputeInvoiceStatus(deleted.invoiceId);
+    if (deleted.invoiceId !== null) await recomputeInvoiceStatus(deleted.invoiceId);
     res.json({ ok: true });
   } catch (err) {
     req.log.error(err);
@@ -135,7 +135,7 @@ router.put("/payments/:id/reassign", async (req, res) => {
       return;
     }
     const [updated] = await db.update(paymentsTable).set({ invoiceId: newInvoiceId }).where(eq(paymentsTable.id, id)).returning();
-    await recomputeInvoiceStatus(oldInvoiceId);
+    if (oldInvoiceId !== null) await recomputeInvoiceStatus(oldInvoiceId);
     await recomputeInvoiceStatus(newInvoiceId);
     res.json({ payment: updated });
   } catch (err) {
@@ -365,7 +365,10 @@ router.post("/payments/import-preview", async (req, res) => {
     // Existing payments, for duplicate detection (see duplicateKey above) —
     // covers every invoice, not just currently-open ones, since a payment
     // already recorded may have since moved that invoice to "paid".
-    const existingPayments = await db.select({ invoiceId: paymentsTable.invoiceId, amount: paymentsTable.amount, paymentDate: paymentsTable.paymentDate }).from(paymentsTable);
+    // Credit payments (invoiceId null — see the payments table comment)
+    // aren't tied to an invoice, so they're irrelevant to duplicate detection.
+    const existingPaymentsRaw = await db.select({ invoiceId: paymentsTable.invoiceId, amount: paymentsTable.amount, paymentDate: paymentsTable.paymentDate }).from(paymentsTable);
+    const existingPayments = existingPaymentsRaw.filter((p): p is typeof p & { invoiceId: number } => p.invoiceId !== null);
     const existingKeys = new Set(existingPayments.map(p => duplicateKey(p.invoiceId, p.amount, new Date(p.paymentDate))));
 
     const matched: (ParsedRow & { candidate: MatchCandidate })[] = [];
