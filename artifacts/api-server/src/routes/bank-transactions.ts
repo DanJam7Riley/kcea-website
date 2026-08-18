@@ -15,7 +15,7 @@
 //  - Re-importing an overlapping statement is safe: rows are deduped against
 //    already-imported ones by date + description + amount before insert.
 import { Router } from "express";
-import { db, commitmentsTable, invoicesTable, paymentsTable, bankTransactionsTable } from "@workspace/db";
+import { db, commitmentsTable, invoicesTable, paymentsTable, bankTransactionsTable, pledgesTable } from "@workspace/db";
 import { eq, and, sql, desc } from "drizzle-orm";
 import { isAdminReq } from "../lib/admin-auth";
 import { recomputeInvoiceStatus } from "./invoices";
@@ -63,11 +63,22 @@ router.get("/bank-transactions", async (req, res) => {
         : [];
     const commitmentById = new Map(commitments.map(c => [c.id, c]));
 
+    const pledgeIds = rows.map(r => r.pledgeId).filter((id): id is number => id !== null);
+    const pledges =
+      pledgeIds.length > 0
+        ? await db
+            .select({ id: pledgesTable.id, fullName: pledgesTable.fullName, amount: pledgesTable.amount, amountReceived: pledgesTable.amountReceived })
+            .from(pledgesTable)
+            .where(sql`${pledgesTable.id} in ${pledgeIds}`)
+        : [];
+    const pledgeById = new Map(pledges.map(p => [p.id, p]));
+
     res.json(
       rows.map(r => ({
         ...r,
         suggestedCommitment: r.suggestedCommitmentId ? commitmentById.get(r.suggestedCommitmentId) ?? null : null,
         commitment: r.commitmentId ? commitmentById.get(r.commitmentId) ?? null : null,
+        pledge: r.pledgeId ? pledgeById.get(r.pledgeId) ?? null : null,
       })),
     );
   } catch (err) {
@@ -303,6 +314,93 @@ router.post("/bank-transactions/:id/allocate", async (req, res) => {
   } catch (err) {
     req.log.error(err);
     res.status(500).json({ error: "Failed to allocate transaction" });
+  }
+});
+
+// Allocate a transaction to a pledge instead of an invoice — admin only.
+// For payments that turn out to be a contribution toward the project
+// (e.g. a large lump sum) rather than the regular household levy. Body
+// is either:
+//   { pledgeId: number }  — add this transaction's amount to an existing
+//                            pledge's amountReceived
+//   { newPledge: { fullName, phone?, email?, amount, isResident?, street?,
+//                   houseNumber?, message? } } — create a new pledge,
+//                            amountReceived starts at this transaction's
+//                            amount
+router.post("/bank-transactions/:id/allocate-pledge", async (req, res) => {
+  if (!isAdminReq(req.headers)) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+  const id = parseInt(req.params.id, 10);
+  if (isNaN(id)) {
+    res.status(400).json({ error: "Invalid id" });
+    return;
+  }
+  const body = req.body as Record<string, unknown>;
+
+  try {
+    const [tx] = await db.select().from(bankTransactionsTable).where(eq(bankTransactionsTable.id, id));
+    if (!tx) {
+      res.status(404).json({ error: "Not found" });
+      return;
+    }
+    if (tx.status === "allocated") {
+      res.status(409).json({ error: "Already allocated" });
+      return;
+    }
+
+    let pledgeId: number;
+    if (typeof body.pledgeId === "number" && Number.isInteger(body.pledgeId)) {
+      const [pledge] = await db.select({ id: pledgesTable.id, amountReceived: pledgesTable.amountReceived }).from(pledgesTable).where(eq(pledgesTable.id, body.pledgeId));
+      if (!pledge) {
+        res.status(400).json({ error: "Pledge not found" });
+        return;
+      }
+      await db.update(pledgesTable).set({ amountReceived: pledge.amountReceived + tx.amount }).where(eq(pledgesTable.id, pledge.id));
+      pledgeId = pledge.id;
+    } else if (body.newPledge && typeof body.newPledge === "object") {
+      const np = body.newPledge as Record<string, unknown>;
+      const fullName = typeof np.fullName === "string" ? np.fullName.trim() : "";
+      if (!fullName) {
+        res.status(400).json({ error: "newPledge.fullName is required" });
+        return;
+      }
+      const pledgeAmount = typeof np.amount === "number" && np.amount > 0 ? Math.round(np.amount) : tx.amount;
+      const isResident = np.isResident === true;
+      const street = typeof np.street === "string" ? np.street.trim() || null : null;
+      const houseNumber = typeof np.houseNumber === "string" ? np.houseNumber.trim() || null : null;
+      const [created] = await db
+        .insert(pledgesTable)
+        .values({
+          fullName,
+          phone: typeof np.phone === "string" ? np.phone.trim() : "",
+          email: typeof np.email === "string" ? np.email.trim() : "",
+          amount: pledgeAmount,
+          isResident,
+          street: isResident ? street : null,
+          houseNumber: isResident ? houseNumber : null,
+          message: typeof np.message === "string" ? np.message.trim() || null : null,
+          commitmentId: tx.suggestedCommitmentId,
+          amountReceived: tx.amount,
+        })
+        .returning();
+      pledgeId = created.id;
+    } else {
+      res.status(400).json({ error: "Either pledgeId or newPledge is required" });
+      return;
+    }
+
+    const [updated] = await db
+      .update(bankTransactionsTable)
+      .set({ status: "allocated", pledgeId })
+      .where(eq(bankTransactionsTable.id, id))
+      .returning();
+
+    res.json({ transaction: updated, pledgeId });
+  } catch (err) {
+    req.log.error(err);
+    res.status(500).json({ error: "Failed to allocate transaction to pledge" });
   }
 });
 

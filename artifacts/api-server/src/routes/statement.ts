@@ -13,6 +13,7 @@ import { Router } from "express";
 import { db, commitmentsTable, invoicesTable, invoiceLineItemsTable, paymentsTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { createHmac, timingSafeEqual } from "node:crypto";
+import { isAdminReq } from "../lib/admin-auth";
 
 const router = Router();
 
@@ -32,6 +33,9 @@ function verifyStatementToken(commitmentId: number, token: string | undefined): 
   }
 }
 
+// Also usable by admin directly (no token needed) — e.g. the resident
+// detail popup in the admin Residents tab. Public callers still need a
+// valid token; the admin auth headers are just an alternate way in.
 router.get("/commitments/:id/statement", async (req, res) => {
   const id = parseInt(req.params.id, 10);
   const token = typeof req.query.t === "string" ? req.query.t : undefined;
@@ -39,7 +43,7 @@ router.get("/commitments/:id/statement", async (req, res) => {
     res.status(400).json({ error: "Invalid id" });
     return;
   }
-  if (!verifyStatementToken(id, token)) {
+  if (!verifyStatementToken(id, token) && !isAdminReq(req.headers)) {
     res.status(403).json({ error: "Invalid or missing link" });
     return;
   }

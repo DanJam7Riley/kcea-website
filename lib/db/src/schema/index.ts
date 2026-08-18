@@ -138,6 +138,12 @@ export const pledgesTable = pgTable("pledges", {
   houseNumber: text("house_number"),
   message: text("message"),
   commitmentId: integer("commitment_id"),
+  // How much of this pledge has actually come in, distinct from the
+  // pledged `amount` — populated by allocating a real bank transaction to
+  // this pledge (see bank-transactions.ts). Added 2026-08-18 so large
+  // lump-sum payments that turn out to be pledges (not the monthly R250
+  // levy) have somewhere to go besides being force-fit into invoices.
+  amountReceived: integer("amount_received").notNull().default(0),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
@@ -269,6 +275,9 @@ export const bankTransactionsTable = pgTable("bank_transactions", {
   commitmentId: integer("commitment_id").references(() => commitmentsTable.id),
   invoiceId: integer("invoice_id").references(() => invoicesTable.id),
   paymentId: integer("payment_id").references(() => paymentsTable.id),
+  // Set instead of invoiceId/paymentId when this transaction turns out to be
+  // a pledge contribution rather than a regular household invoice payment.
+  pledgeId: integer("pledge_id").references(() => pledgesTable.id),
   source: text("source").notNull().default("csv_import"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });

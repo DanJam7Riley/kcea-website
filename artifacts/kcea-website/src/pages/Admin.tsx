@@ -2,7 +2,7 @@ import { useState, useRef, useMemo, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Shield, Save, LogIn, AlertTriangle, CheckCircle, Check, Key, Pencil,
-  Trash2, Download, Upload, Users, UserPlus, ClipboardList, BarChart3, Search, MessageSquare, RefreshCw, Phone, ExternalLink, Settings as SettingsIcon, Heart, Mail, X, FileText, Plus, Printer, Landmark, EyeOff
+  Trash2, Download, Upload, Users, UserPlus, ClipboardList, BarChart3, Search, MessageSquare, RefreshCw, Phone, ExternalLink, Settings as SettingsIcon, Heart, Mail, X, FileText, Plus, Printer, Landmark, EyeOff, Eye
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -28,6 +28,7 @@ interface PledgeRow {
   houseNumber: string | null;
   message: string | null;
   commitmentId: number | null;
+  amountReceived: number;
   createdAt: string;
 }
 
@@ -216,6 +217,41 @@ export default function Admin() {
   const [secondaryPwError, setSecondaryPwError] = useState("");
   const [showSecondaryPw, setShowSecondaryPw] = useState(false);
   const [activeTab, setActiveTab] = useState<Tab>("submissions");
+
+  // ── Resident detail popup ─────────────────────────────────────────
+  // Click-through from the Residents list — same pattern as Slipstream's
+  // "Account Holder" popup: contact info, balance, and transaction history
+  // in one place. Reuses the existing resident statement endpoint (admin
+  // auth bypasses the token check there).
+  const [viewingResidentId, setViewingResidentId] = useState<number | null>(null);
+  interface ResidentStatementLineItem { description: string; quantity: number; unitAmount: number; amount: number }
+  interface ResidentStatementPayment { amount: number; paymentDate: string; method: string; reference: string | null }
+  interface ResidentStatementInvoice {
+    id: number;
+    invoiceNumber: string;
+    invoiceDate: string;
+    dueDate: string;
+    status: string;
+    total: number;
+    amountPaid: number;
+    balance: number;
+    lineItems: ResidentStatementLineItem[];
+    payments: ResidentStatementPayment[];
+  }
+  interface ResidentStatement {
+    commitment: { id: number; fullName: string; street: string; houseNumber: string; commitmentType: string };
+    invoices: ResidentStatementInvoice[];
+    totalOutstanding: number;
+    invoiceCount: number;
+  }
+  const { data: residentStatement, isLoading: residentStatementLoading } = useQuery<ResidentStatement>({
+    queryKey: ["resident-statement", viewingResidentId],
+    queryFn: () => fetch(`${BASE}/api/commitments/${viewingResidentId}/statement`, { headers: authHeaders }).then(async r => {
+      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error ?? "Failed to load");
+      return r.json();
+    }),
+    enabled: authed && viewingResidentId !== null,
+  });
   const [search, setSearch] = useState("");
 
   const [statsSaved, setStatsSaved] = useState(false);
@@ -411,6 +447,7 @@ export default function Admin() {
       }),
     enabled: authed,
   });
+  const viewingResidentContact = commitments.find(c => c.id === viewingResidentId) ?? null;
 
   const { data: pledges = [], isLoading: pledgesLoading } = useQuery<PledgeRow[]>({
     queryKey: ["pledges"],
@@ -634,6 +671,12 @@ export default function Admin() {
     street: string;
     houseNumber: string;
   }
+  interface BankTxPledgeInfo {
+    id: number;
+    fullName: string;
+    amount: number;
+    amountReceived: number;
+  }
   interface BankTxRow {
     id: number;
     transactionDate: string;
@@ -644,8 +687,10 @@ export default function Admin() {
     commitmentId: number | null;
     invoiceId: number | null;
     paymentId: number | null;
+    pledgeId: number | null;
     suggestedCommitment: BankTxCommitmentInfo | null;
     commitment: BankTxCommitmentInfo | null;
+    pledge: BankTxPledgeInfo | null;
   }
   const [hideAllocatedTx, setHideAllocatedTx] = useState(true);
   const [showTxImport, setShowTxImport] = useState(false);
@@ -729,11 +774,60 @@ export default function Admin() {
     enabled: !!allocateCommitmentId,
   });
 
+  // Invoice vs pledge — some large payments (e.g. a lump sum) turn out to be
+  // a contribution toward the project rather than the regular household
+  // levy. Added 2026-08-18 after finding real R5,000 payments that didn't
+  // fit any single invoice.
+  const [allocateMode, setAllocateMode] = useState<"invoice" | "pledge">("invoice");
+  const [pledgeSearch, setPledgeSearch] = useState("");
+  const [pledgeSelectedId, setPledgeSelectedId] = useState<number | null>(null);
+  const [pledgeNewName, setPledgeNewName] = useState("");
+  const [pledgeNewAmount, setPledgeNewAmount] = useState("");
+
+  interface SimplePledge { id: number; fullName: string; amount: number; amountReceived: number }
+  const { data: allPledges = [] } = useQuery<SimplePledge[]>({
+    queryKey: ["pledges-for-allocate"],
+    queryFn: () => fetch(`${BASE}/api/pledges`, { headers: authHeaders }).then(async r => {
+      if (!r.ok) throw new Error("Failed to load");
+      return r.json();
+    }),
+    enabled: authed && !!allocatingTx && allocateMode === "pledge",
+  });
+  const pledgeMatches = pledgeSearch.trim().length >= 2
+    ? allPledges.filter(p => p.fullName.toLowerCase().includes(pledgeSearch.toLowerCase())).slice(0, 8)
+    : [];
+
+  const allocatePledgeMutation = useMutation({
+    mutationFn: () =>
+      fetch(`${BASE}/api/bank-transactions/${allocatingTx!.id}/allocate-pledge`, {
+        method: "POST",
+        headers: { ...authHeaders, "Content-Type": "application/json" },
+        body: JSON.stringify(
+          pledgeSelectedId
+            ? { pledgeId: pledgeSelectedId }
+            : { newPledge: { fullName: pledgeNewName, amount: Number(pledgeNewAmount) || allocatingTx!.amount, isResident: !!allocatingTx!.suggestedCommitmentId } },
+        ),
+      }).then(async r => {
+        if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error ?? "Failed to allocate to pledge");
+        return r.json();
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["bank-transactions"] });
+      qc.invalidateQueries({ queryKey: ["pledges"] });
+      setAllocatingTx(null);
+    },
+  });
+
   function openAllocate(tx: BankTxRow) {
     setAllocatingTx(tx);
+    setAllocateMode("invoice");
     setAllocateSearch("");
     setAllocateCommitmentId(tx.suggestedCommitmentId ?? null);
     setAllocateInvoiceId(null);
+    setPledgeSearch("");
+    setPledgeSelectedId(null);
+    setPledgeNewName(tx.suggestedCommitment?.fullName ?? "");
+    setPledgeNewAmount(String(tx.amount));
     if (tx.suggestedCommitment) {
       setAllocateSearch(`${tx.suggestedCommitment.fullName} — ${tx.suggestedCommitment.street} ${tx.suggestedCommitment.houseNumber}`);
     }
@@ -1676,7 +1770,7 @@ export default function Admin() {
         <div className="flex gap-6 items-start">
           {/* Sidebar nav */}
           <nav className="w-56 shrink-0 space-y-1 sticky top-24">
-            {([ ["submissions", ClipboardList, "Submissions"], ["stats", BarChart3, "Stats"], ["captains", Users, "Captains"], ["manage-captains", UserPlus, "Manage Captains"], ["incomplete", AlertTriangle, "Incomplete"], ["captain-mgmt", Key, "Captain Portal"], ["pledges", Heart, "Pledges"], ["invoices", FileText, "Invoices"], ["bank-transactions", Landmark, "Bank Transactions"], ["settings", SettingsIcon, "Settings"] ] as const).map(([tab, Icon, label]) => (
+            {([ ["submissions", ClipboardList, "Residents"], ["stats", BarChart3, "Stats"], ["captains", Users, "Captains"], ["manage-captains", UserPlus, "Manage Captains"], ["incomplete", AlertTriangle, "Incomplete"], ["captain-mgmt", Key, "Captain Portal"], ["pledges", Heart, "Pledges"], ["invoices", FileText, "Invoices"], ["bank-transactions", Landmark, "Bank Transactions"], ["settings", SettingsIcon, "Settings"] ] as const).map(([tab, Icon, label]) => (
               <button
                 key={tab}
                 onClick={() => setActiveTab(tab)}
@@ -1708,7 +1802,7 @@ export default function Admin() {
         {activeTab === "submissions" && (
           <Card className="bg-card border-card-border">
             <CardHeader className="flex flex-row items-center justify-between gap-4 pb-4">
-              <CardTitle className="text-xl">Commitment Submissions</CardTitle>
+              <CardTitle className="text-xl">Residents</CardTitle>
               <div className="flex gap-2">
                 <input
                   ref={fileInputRef}
@@ -1839,7 +1933,14 @@ export default function Admin() {
                     return (
                     <div key={c.id} className={`grid grid-cols-12 gap-3 items-center px-3 py-3 rounded-lg border transition-colors ${streetMissing ? "bg-red-500/5 border-red-500/40 hover:border-red-500/60" : newStreet ? "bg-amber-500/5 border-amber-500/40 hover:border-amber-500/60" : "bg-background/50 border-border hover:border-border/80"}`} data-testid={`submission-row-${c.id}`}>
                       <div className="col-span-2">
-                        <p className="font-medium text-sm">{c.fullName}</p>
+                        <button
+                          type="button"
+                          onClick={() => setViewingResidentId(c.id)}
+                          className="font-medium text-sm text-primary hover:underline text-left"
+                          data-testid={`link-resident-${c.id}`}
+                        >
+                          {c.fullName}
+                        </button>
                         <p className="text-xs text-muted-foreground">#{c.id}</p>
                       </div>
                       <div className="col-span-2">
@@ -1926,6 +2027,14 @@ export default function Admin() {
                           <span className="text-xs text-green-400 flex items-center gap-1 mr-1"><CheckCircle className="h-3.5 w-3.5" /> Saved</span>
                         )}
                         <button
+                          onClick={() => setViewingResidentId(c.id)}
+                          className="text-muted-foreground hover:text-primary transition-colors p-1 rounded"
+                          title="View resident — balance & history"
+                          data-testid={`btn-view-resident-${c.id}`}
+                        >
+                          <Eye className="h-4 w-4" />
+                        </button>
+                        <button
                           onClick={() => confirmPayment.mutate({ id: c.id, paymentConfirmed: !c.paymentConfirmed })}
                           className={`transition-colors p-1 rounded ${c.paymentConfirmed ? "text-green-400 hover:text-muted-foreground" : "text-muted-foreground hover:text-green-400"}`}
                           title={c.paymentConfirmed ? "Mark payment unconfirmed" : "Mark payment confirmed"}
@@ -1960,6 +2069,78 @@ export default function Admin() {
               )}
             </CardContent>
           </Card>
+        )}
+
+        {viewingResidentId !== null && (
+          <Dialog open={viewingResidentId !== null} onOpenChange={open => !open && setViewingResidentId(null)}>
+            <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
+              <DialogHeader>
+                <DialogTitle>{viewingResidentContact?.fullName ?? "Resident"}</DialogTitle>
+              </DialogHeader>
+              {residentStatementLoading ? (
+                <p className="text-sm text-muted-foreground py-6 text-center">Loading…</p>
+              ) : !residentStatement ? (
+                <p className="text-sm text-red-400 py-6 text-center">Failed to load.</p>
+              ) : (
+                <div className="space-y-4">
+                  <div className="rounded-lg border border-border bg-background/50 p-3 space-y-1 text-sm">
+                    {viewingResidentContact?.phone && (
+                      <p className="flex items-center gap-1.5"><Phone className="h-3.5 w-3.5 text-muted-foreground" /> {viewingResidentContact.phone}</p>
+                    )}
+                    {viewingResidentContact?.email && (
+                      <p className="flex items-center gap-1.5"><Mail className="h-3.5 w-3.5 text-muted-foreground" /> {viewingResidentContact.email}</p>
+                    )}
+                    <p className="text-muted-foreground">
+                      {residentStatement.commitment.street} No. {residentStatement.commitment.houseNumber}
+                      {" · "}{residentStatement.commitment.commitmentType === "onceoff" ? "Once-off R3,000" : "Monthly R250"}
+                    </p>
+                    {viewingResidentContact?.submittedAt && (
+                      <p className="text-xs text-muted-foreground">
+                        Registered {new Date(viewingResidentContact.submittedAt).toLocaleDateString("en-ZA", { day: "2-digit", month: "short", year: "numeric" })}
+                      </p>
+                    )}
+                  </div>
+
+                  <div className="flex items-center justify-between rounded-lg border border-border p-3">
+                    <span className="text-sm text-muted-foreground">Balance</span>
+                    <span className={`text-lg font-bold ${residentStatement.totalOutstanding > 0 ? "text-red-400" : "text-green-400"}`}>
+                      R{residentStatement.totalOutstanding.toLocaleString("en-ZA")}
+                    </span>
+                  </div>
+
+                  <div>
+                    <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">Recent Transactions</p>
+                    {residentStatement.invoices.length === 0 ? (
+                      <p className="text-sm text-muted-foreground">No invoices on file yet.</p>
+                    ) : (
+                      <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
+                        {[...residentStatement.invoices].reverse().map(inv => (
+                          <div key={inv.id} className="rounded-lg border border-border p-2.5 text-sm">
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="font-mono text-xs font-semibold">{inv.invoiceNumber}</span>
+                              <Badge className={`${invoiceStatusBadgeClass(inv.status)} text-xs`} variant="outline">{inv.status}</Badge>
+                            </div>
+                            <div className="flex items-center justify-between text-xs text-muted-foreground mt-1">
+                              <span>{new Date(inv.invoiceDate).toLocaleDateString("en-ZA")}</span>
+                              <span>R{inv.total.toLocaleString("en-ZA")}{inv.amountPaid > 0 ? ` (R${inv.amountPaid.toLocaleString("en-ZA")} paid)` : ""}</span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setViewingResidentId(null)}>Close</Button>
+                {viewingResidentContact && (
+                  <Button onClick={() => { openEditCommitment(viewingResidentContact); setViewingResidentId(null); }} className="gap-1.5">
+                    <Pencil className="h-3.5 w-3.5" /> Edit
+                  </Button>
+                )}
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
         )}
 
         {/* Stats Tab */}
@@ -2893,6 +3074,14 @@ export default function Admin() {
                               <Badge className="bg-primary/20 text-primary border-primary/20 text-xs" variant="outline">
                                 R{p.amount.toLocaleString("en-ZA")}
                               </Badge>
+                              {p.amountReceived > 0 && (
+                                <Badge
+                                  className={`text-xs ${p.amountReceived >= p.amount ? "bg-green-500/20 text-green-400 border-green-500/20" : "bg-amber-500/20 text-amber-400 border-amber-500/20"}`}
+                                  variant="outline"
+                                >
+                                  Received R{p.amountReceived.toLocaleString("en-ZA")}
+                                </Badge>
+                              )}
                               {p.isResident ? (
                                 <Badge className="bg-blue-500/20 text-blue-400 border-blue-500/20 text-xs" variant="outline">
                                   Resident — {p.street} {p.houseNumber}
@@ -3760,6 +3949,11 @@ export default function Admin() {
                               Allocated — {tx.commitment.fullName} ({tx.commitment.street} {tx.commitment.houseNumber})
                             </Badge>
                           )}
+                          {tx.status === "allocated" && tx.pledge && (
+                            <Badge className="bg-purple-500/20 text-purple-400 border-purple-500/20 text-xs" variant="outline">
+                              Pledge — {tx.pledge.fullName} (R{tx.pledge.amountReceived.toLocaleString("en-ZA")} of R{tx.pledge.amount.toLocaleString("en-ZA")})
+                            </Badge>
+                          )}
                           {tx.status === "ignored" && (
                             <Badge className="bg-muted text-muted-foreground border-transparent text-xs" variant="outline">Ignored</Badge>
                           )}
@@ -3874,67 +4068,146 @@ export default function Admin() {
               </DialogHeader>
               <div className="space-y-3">
                 <p className="text-sm text-muted-foreground">{allocatingTx.description}</p>
-                <div className="space-y-1.5">
-                  <Label htmlFor="allocate-search">Household</Label>
-                  <Input
-                    id="allocate-search"
-                    placeholder="Search by name or street..."
-                    value={allocateSearch}
-                    onChange={e => { setAllocateSearch(e.target.value); setAllocateCommitmentId(null); setAllocateInvoiceId(null); }}
-                    data-testid="allocate-search-input"
-                  />
-                  {allocateSearch.trim().length >= 2 && !allocateCommitmentId && (
-                    <div className="max-h-40 overflow-y-auto border border-border rounded-lg">
-                      {allocateMatches.length === 0 ? (
-                        <p className="text-xs text-muted-foreground p-2">No matches</p>
-                      ) : (
-                        allocateMatches.map(c => (
-                          <button
-                            key={c.id}
-                            type="button"
-                            className="w-full text-left px-3 py-1.5 text-sm hover:bg-background/50"
-                            onClick={() => { setAllocateCommitmentId(c.id); setAllocateSearch(`${c.fullName} — ${c.street} ${c.houseNumber}`); }}
-                          >
-                            {c.fullName} — {c.street} {c.houseNumber}
-                          </button>
-                        ))
+
+                <div className="flex gap-1 rounded-lg border border-border p-1 w-fit">
+                  <button
+                    type="button"
+                    className={`px-3 py-1 rounded-md text-xs font-medium ${allocateMode === "invoice" ? "bg-primary/15 text-primary" : "text-muted-foreground"}`}
+                    onClick={() => setAllocateMode("invoice")}
+                    data-testid="allocate-mode-invoice"
+                  >
+                    Invoice
+                  </button>
+                  <button
+                    type="button"
+                    className={`px-3 py-1 rounded-md text-xs font-medium ${allocateMode === "pledge" ? "bg-primary/15 text-primary" : "text-muted-foreground"}`}
+                    onClick={() => setAllocateMode("pledge")}
+                    data-testid="allocate-mode-pledge"
+                  >
+                    Pledge
+                  </button>
+                </div>
+
+                {allocateMode === "invoice" ? (
+                  <>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="allocate-search">Household</Label>
+                      <Input
+                        id="allocate-search"
+                        placeholder="Search by name or street..."
+                        value={allocateSearch}
+                        onChange={e => { setAllocateSearch(e.target.value); setAllocateCommitmentId(null); setAllocateInvoiceId(null); }}
+                        data-testid="allocate-search-input"
+                      />
+                      {allocateSearch.trim().length >= 2 && !allocateCommitmentId && (
+                        <div className="max-h-40 overflow-y-auto border border-border rounded-lg">
+                          {allocateMatches.length === 0 ? (
+                            <p className="text-xs text-muted-foreground p-2">No matches</p>
+                          ) : (
+                            allocateMatches.map(c => (
+                              <button
+                                key={c.id}
+                                type="button"
+                                className="w-full text-left px-3 py-1.5 text-sm hover:bg-background/50"
+                                onClick={() => { setAllocateCommitmentId(c.id); setAllocateSearch(`${c.fullName} — ${c.street} ${c.houseNumber}`); }}
+                              >
+                                {c.fullName} — {c.street} {c.houseNumber}
+                              </button>
+                            ))
+                          )}
+                        </div>
                       )}
                     </div>
-                  )}
-                </div>
-                {allocateCommitmentId && (
-                  <div className="space-y-1.5">
-                    <Label htmlFor="allocate-invoice">Invoice</Label>
-                    <select
-                      id="allocate-invoice"
-                      className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                      value={allocateInvoiceId ?? ""}
-                      onChange={e => setAllocateInvoiceId(e.target.value ? Number(e.target.value) : null)}
-                      data-testid="allocate-invoice-select"
-                    >
-                      <option value="">Select an invoice...</option>
-                      {allocateInvoices.map(inv => (
-                        <option key={inv.id} value={inv.id}>
-                          {inv.invoiceNumber} — R{inv.total.toLocaleString("en-ZA")} ({inv.status})
-                        </option>
-                      ))}
-                    </select>
-                    {allocateInvoices.length === 0 && (
-                      <p className="text-xs text-amber-400">No invoices on file for this household yet.</p>
+                    {allocateCommitmentId && (
+                      <div className="space-y-1.5">
+                        <Label htmlFor="allocate-invoice">Invoice</Label>
+                        <select
+                          id="allocate-invoice"
+                          className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                          value={allocateInvoiceId ?? ""}
+                          onChange={e => setAllocateInvoiceId(e.target.value ? Number(e.target.value) : null)}
+                          data-testid="allocate-invoice-select"
+                        >
+                          <option value="">Select an invoice...</option>
+                          {allocateInvoices.map(inv => (
+                            <option key={inv.id} value={inv.id}>
+                              {inv.invoiceNumber} — R{inv.total.toLocaleString("en-ZA")} ({inv.status})
+                            </option>
+                          ))}
+                        </select>
+                        {allocateInvoices.length === 0 && (
+                          <p className="text-xs text-amber-400">No invoices on file for this household yet — generate one first (e.g. Multi-month invoice) if this payment covers more than the current month.</p>
+                        )}
+                      </div>
                     )}
-                  </div>
+                    {allocateMutation.isError && <p className="text-sm text-red-400">{(allocateMutation.error as Error).message}</p>}
+                  </>
+                ) : (
+                  <>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="pledge-search">Existing pledge</Label>
+                      <Input
+                        id="pledge-search"
+                        placeholder="Search by name..."
+                        value={pledgeSearch}
+                        onChange={e => { setPledgeSearch(e.target.value); setPledgeSelectedId(null); }}
+                        data-testid="pledge-search-input"
+                      />
+                      {pledgeSearch.trim().length >= 2 && !pledgeSelectedId && (
+                        <div className="max-h-40 overflow-y-auto border border-border rounded-lg">
+                          {pledgeMatches.length === 0 ? (
+                            <p className="text-xs text-muted-foreground p-2">No matches</p>
+                          ) : (
+                            pledgeMatches.map(p => (
+                              <button
+                                key={p.id}
+                                type="button"
+                                className="w-full text-left px-3 py-1.5 text-sm hover:bg-background/50"
+                                onClick={() => { setPledgeSelectedId(p.id); setPledgeSearch(p.fullName); }}
+                              >
+                                {p.fullName} — pledged R{p.amount.toLocaleString("en-ZA")}, received R{p.amountReceived.toLocaleString("en-ZA")}
+                              </button>
+                            ))
+                          )}
+                        </div>
+                      )}
+                    </div>
+                    {!pledgeSelectedId && (
+                      <div className="space-y-2 pt-1 border-t border-border">
+                        <p className="text-xs text-muted-foreground pt-2">— or create a new pledge —</p>
+                        <div className="space-y-1.5">
+                          <Label htmlFor="pledge-new-name">Name</Label>
+                          <Input id="pledge-new-name" value={pledgeNewName} onChange={e => setPledgeNewName(e.target.value)} data-testid="pledge-new-name-input" />
+                        </div>
+                        <div className="space-y-1.5">
+                          <Label htmlFor="pledge-new-amount">Pledge amount (R) — how much they're pledging in total, not just this payment</Label>
+                          <Input id="pledge-new-amount" type="number" value={pledgeNewAmount} onChange={e => setPledgeNewAmount(e.target.value)} data-testid="pledge-new-amount-input" />
+                        </div>
+                      </div>
+                    )}
+                    {allocatePledgeMutation.isError && <p className="text-sm text-red-400">{(allocatePledgeMutation.error as Error).message}</p>}
+                  </>
                 )}
-                {allocateMutation.isError && <p className="text-sm text-red-400">{(allocateMutation.error as Error).message}</p>}
               </div>
               <DialogFooter>
                 <Button variant="outline" onClick={() => setAllocatingTx(null)}>Cancel</Button>
-                <Button
-                  disabled={!allocateCommitmentId || !allocateInvoiceId || allocateMutation.isPending}
-                  onClick={() => allocateMutation.mutate()}
-                  data-testid="submit-allocate"
-                >
-                  {allocateMutation.isPending ? "Allocating..." : "Allocate"}
-                </Button>
+                {allocateMode === "invoice" ? (
+                  <Button
+                    disabled={!allocateCommitmentId || !allocateInvoiceId || allocateMutation.isPending}
+                    onClick={() => allocateMutation.mutate()}
+                    data-testid="submit-allocate"
+                  >
+                    {allocateMutation.isPending ? "Allocating..." : "Allocate"}
+                  </Button>
+                ) : (
+                  <Button
+                    disabled={(!pledgeSelectedId && !pledgeNewName.trim()) || allocatePledgeMutation.isPending}
+                    onClick={() => allocatePledgeMutation.mutate()}
+                    data-testid="submit-allocate-pledge"
+                  >
+                    {allocatePledgeMutation.isPending ? "Allocating..." : "Allocate to pledge"}
+                  </Button>
+                )}
               </DialogFooter>
             </DialogContent>
           </Dialog>
