@@ -15,11 +15,25 @@
 //  - Re-importing an overlapping statement is safe: rows are deduped against
 //    already-imported ones by date + description + amount before insert.
 import { Router } from "express";
-import { db, commitmentsTable, invoicesTable, paymentsTable, bankTransactionsTable, pledgesTable } from "@workspace/db";
+import { db, commitmentsTable, invoicesTable, paymentsTable, bankTransactionsTable, pledgesTable, bankPayerReferencesTable } from "@workspace/db";
 import { eq, and, sql, desc } from "drizzle-orm";
 import { isAdminReq } from "../lib/admin-auth";
 import { recomputeInvoiceStatus } from "./invoices";
-import { parseCsv, detectColumns, parseAmount, findMatch, duplicateKey } from "./payments";
+import { parseCsv, detectColumns, parseAmount, findMatch, duplicateKey, descriptionKey } from "./payments";
+
+// Remember that this bank description belongs to this household, so future
+// imports of the same payer (recurring EFT/debit order text repeats
+// verbatim) auto-allocate instead of needing a human every time. Upserts —
+// if an admin re-allocates the same description to a different household
+// later (a correction), the mapping moves with it.
+async function rememberPayerReference(description: string, commitmentId: number, createdBy: string): Promise<void> {
+  const key = descriptionKey(description);
+  if (!key) return;
+  await db
+    .insert(bankPayerReferencesTable)
+    .values({ descriptionKey: key, commitmentId, createdBy })
+    .onConflictDoUpdate({ target: bankPayerReferencesTable.descriptionKey, set: { commitmentId, createdBy } });
+}
 
 const router = Router();
 
@@ -118,6 +132,14 @@ router.post("/bank-transactions/import", async (req, res) => {
     const commitments = await db
       .select({ id: commitmentsTable.id, fullName: commitmentsTable.fullName, street: commitmentsTable.street, houseNumber: commitmentsTable.houseNumber })
       .from(commitmentsTable);
+    const commitmentById = new Map(commitments.map(c => [c.id, c]));
+
+    // Descriptions an admin has previously hand-matched to a household (see
+    // rememberPayerReference / the /allocate route below) — checked first,
+    // ahead of the street/house guesser, since these are human-confirmed
+    // rather than inferred.
+    const payerRefs = await db.select().from(bankPayerReferencesTable);
+    const knownPayerByKey = new Map(payerRefs.map(r => [r.descriptionKey, r.commitmentId]));
 
     const openInvoicesByCommitment = new Map<number, { id: number; invoiceNumber: string; total: number }[]>();
     const invoices = await db
@@ -179,7 +201,13 @@ router.post("/bank-transactions/import", async (req, res) => {
       }
       existingTxKeys.add(txKey);
 
-      const match = findMatch(row.description, commitments);
+      // A known payer reference (an admin manually matched this exact
+      // description before) takes priority over the street/house guesser —
+      // it's human-confirmed, and covers descriptions the guesser can never
+      // parse (e.g. "CAPITEC D VILJOEN", no address in the text at all).
+      const knownCommitmentId = knownPayerByKey.get(descriptionKey(row.description));
+      const knownCommitment = knownCommitmentId ? commitmentById.get(knownCommitmentId) ?? null : null;
+      const match = knownCommitment ?? findMatch(row.description, commitments);
       const openInvoice = match ? nextInvoiceWithRoom(match.id) : null;
       const isDuplicatePayment = openInvoice ? existingPaymentKeys.has(duplicateKey(openInvoice.id, row.amount, rowDate)) : false;
       // A payment larger than what the matched invoice actually still owes
@@ -310,6 +338,10 @@ router.post("/bank-transactions/:id/allocate", async (req, res) => {
       .returning();
 
     await recomputeInvoiceStatus(invoiceId);
+    // Remember this description → household match so the same payer's next
+    // transaction (recurring EFT/debit order text repeats verbatim)
+    // auto-allocates on the next import instead of landing here again.
+    await rememberPayerReference(tx.description, commitmentId, adminUsername(req));
     res.json({ transaction: updated, payment });
   } catch (err) {
     req.log.error(err);

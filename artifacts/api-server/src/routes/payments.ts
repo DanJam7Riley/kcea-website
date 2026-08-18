@@ -281,6 +281,15 @@ function coreStreetName(street: string): string {
   return words.join(" ");
 }
 
+// Key for the learned bank_payer_references mapping — the full description,
+// lowercased and whitespace-collapsed. Deliberately exact-match (not fuzzy
+// like findMatch's street/house search): this key only ever gets written
+// when an admin has actually confirmed the household by hand, so a loose
+// match here could silently misfile a different household's real payment.
+export function descriptionKey(description: string): string {
+  return description.toLowerCase().trim().replace(/\s+/g, " ");
+}
+
 export function findMatch(
   description: string,
   commitments: { id: number; fullName: string; street: string; houseNumber: string }[],

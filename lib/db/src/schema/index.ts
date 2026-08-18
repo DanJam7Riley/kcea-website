@@ -320,3 +320,27 @@ export const expensesTable = pgTable("expenses", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 export type Expense = typeof expensesTable.$inferSelect;
+
+// ── Bank payer references ────────────────────────────────────────
+// A learned mapping from a normalized bank-statement description to the
+// household an admin manually matched it to. Added 2026-08-18 in response
+// to the "155 unallocated" investigation: many unallocated rows have a bank
+// description with no parseable street/house (e.g. "CAPITEC D VILJOEN")
+// but the same payer's description text repeats verbatim on their next
+// EFT/debit order. Once an admin allocates one such transaction by hand
+// (see bank-transactions.ts allocate route), the description is
+// remembered here so future imports of the same payer auto-allocate
+// instead of landing back in the unallocated queue every time.
+// "descriptionKey" is the normalized (lowercased, whitespace-collapsed)
+// full description text — deliberately exact-match, not fuzzy, so a wrong
+// guess can't silently misfile a different household's payment.
+export const bankPayerReferencesTable = pgTable("bank_payer_references", {
+  id: serial("id").primaryKey(),
+  descriptionKey: text("description_key").notNull().unique(),
+  commitmentId: integer("commitment_id")
+    .notNull()
+    .references(() => commitmentsTable.id),
+  createdBy: text("created_by"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+export type BankPayerReference = typeof bankPayerReferencesTable.$inferSelect;
