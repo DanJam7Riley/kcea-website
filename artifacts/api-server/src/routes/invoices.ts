@@ -5,6 +5,7 @@ import { isAdminReq, adminRoleFromHeaders, PRIMARY_USERNAME, SECONDARY_USERNAME 
 import { sendEmail } from "../lib/email";
 import { buildInvoicePdf } from "../lib/invoice-pdf";
 import { makeStatementToken } from "./statement";
+import { logCommunication } from "./communications";
 
 const SITE_URL = process.env.PUBLIC_SITE_URL ?? "https://www.kcea.co.za";
 
@@ -604,6 +605,9 @@ router.post("/invoices/send-all", async (req, res) => {
       const result = await sendEmail(inv.billToEmail as string, subject, text, attachments);
       if (result.ok) {
         await db.update(invoicesTable).set({ emailSentAt: new Date() }).where(eq(invoicesTable.id, inv.id));
+        if (inv.commitmentId) {
+          await logCommunication({ commitmentId: inv.commitmentId, type: "invoice", subject, recipient: inv.billToEmail as string });
+        }
         sent++;
       } else {
         req.log.warn({ invoiceId: inv.id, reason: result.reason }, "Invoice email failed to send");
@@ -706,6 +710,9 @@ router.post("/invoices/:id/send-test", async (req, res) => {
     if (!result.ok) {
       res.status(502).json({ error: `Send failed: ${result.reason}`, pdfAttached: !!attachments, pdfError });
       return;
+    }
+    if (inv.commitmentId) {
+      await logCommunication({ commitmentId: inv.commitmentId, type: "invoice_test", subject, recipient: email });
     }
     res.json({ ok: true, pdfAttached: !!attachments, pdfError });
   } catch (err) {
