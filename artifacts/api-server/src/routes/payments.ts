@@ -96,7 +96,7 @@ router.delete("/payments/:id", async (req, res) => {
 
 // ── Bank statement CSV import ────────────────────────────────────────────
 
-interface ParsedRow {
+export interface ParsedRow {
   rowIndex: number;
   date: string | null;
   description: string;
@@ -106,7 +106,7 @@ interface ParsedRow {
 // Minimal, dependency-free CSV parser (handles quoted fields with embedded
 // commas). FNB's export uses simple comma-separated columns with an
 // optional header row.
-function parseCsv(text: string): string[][] {
+export function parseCsv(text: string): string[][] {
   const rows: string[][] = [];
   let field = "";
   let row: string[] = [];
@@ -154,7 +154,7 @@ function parseCsv(text: string): string[][] {
 //   Date,SERVICE FEE,Amount,DESCRIPTION,REFERENCE,Balance,CHEQUE NUMBER,
 // — so the header row isn't necessarily row 0. Scan the first few rows for
 // one that looks like a real header instead of assuming row 0 is it.
-function detectColumns(rows: string[][]): { dateIdx: number; descIdx: number; amountIdx: number; startRow: number } {
+export function detectColumns(rows: string[][]): { dateIdx: number; descIdx: number; amountIdx: number; startRow: number } {
   const headerCandidates = ["date", "description", "amount", "money in", "credit", "deposit", "narrative"];
   const SCAN_ROWS = 5;
   for (let i = 0; i < Math.min(SCAN_ROWS, rows.length); i++) {
@@ -180,7 +180,7 @@ function detectColumns(rows: string[][]): { dateIdx: number; descIdx: number; am
   return { dateIdx: 0, descIdx: 1, amountIdx: 2, startRow: 0 };
 }
 
-function parseAmount(raw: string | undefined): number | null {
+export function parseAmount(raw: string | undefined): number | null {
   if (!raw) return null;
   const cleaned = raw.replace(/[^0-9.\-]/g, "");
   if (!cleaned) return null;
@@ -194,7 +194,7 @@ function parseAmount(raw: string | undefined): number | null {
 // previous import (e.g. downloading "from the start" after already having
 // imported the last few weeks) would otherwise create a second payment row
 // for every transaction already recorded.
-function duplicateKey(invoiceId: number, amount: number, date: Date): string {
+export function duplicateKey(invoiceId: number, amount: number, date: Date): string {
   const day = date.toISOString().slice(0, 10);
   return `${invoiceId}|${amount}|${day}`;
 }
@@ -224,7 +224,7 @@ function coreStreetName(street: string): string {
   return words.join(" ");
 }
 
-function findMatch(
+export function findMatch(
   description: string,
   commitments: { id: number; fullName: string; street: string; houseNumber: string }[],
 ): { id: number; fullName: string; street: string; houseNumber: string } | null {
