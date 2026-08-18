@@ -478,6 +478,13 @@ router.put("/commitments/:id", async (req, res) => {
     const v = strField(k);
     if (v !== undefined) patch[k] = v;
   }
+  // notes is nullable (unlike the fields above), so an empty string clears it
+  // rather than getting stored as "" — used by the resident detail page's
+  // Notes tab.
+  if ("notes" in body) {
+    const v = strField("notes");
+    patch.notes = v || null;
+  }
   if (typeof body.imported === "boolean") patch.imported = body.imported;
   if (typeof body.paymentConfirmed === "boolean") patch.paymentConfirmed = body.paymentConfirmed;
   if (typeof body.submittedAt === "string" && body.submittedAt) {
