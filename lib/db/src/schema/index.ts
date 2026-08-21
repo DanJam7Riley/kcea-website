@@ -96,6 +96,7 @@ export const siteSettingsTable = pgTable("site_settings", {
   id: serial("id").primaryKey(),
   notifyWhatsapp: text("notify_whatsapp"),
   adminPassword2: text("admin_password_2"),
+  adminPassword3: text("admin_password_3"),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
 export type SiteSettings = typeof siteSettingsTable.$inferSelect;

@@ -1,7 +1,7 @@
 import app from "./app";
 import { logger } from "./lib/logger";
 import { seedIfEmpty } from "./seed";
-import { loadSecondaryPassword } from "./lib/admin-auth";
+import { loadSecondaryPassword, loadTertiaryPassword } from "./lib/admin-auth";
 
 const rawPort = process.env["PORT"];
 
@@ -17,12 +17,18 @@ if (Number.isNaN(port) || port <= 0) {
   throw new Error(`Invalid PORT value: "${rawPort}"`);
 }
 
-// Warm the secondary-admin password cache from the DB BEFORE accepting
-// requests. Falls back to env/default on any error, so a transient DB issue
-// can't keep the server from coming up — but in the common case auth uses
-// the DB-backed value from the very first request.
-void loadSecondaryPassword()
-  .catch((err) => logger.warn({ err }, "Initial secondary admin password load failed; using fallback"))
+// Warm the secondary- and third-admin password caches from the DB BEFORE
+// accepting requests. Falls back to env/default on any error, so a
+// transient DB issue can't keep the server from coming up — but in the
+// common case auth uses the DB-backed value from the very first request.
+void Promise.all([
+  loadSecondaryPassword().catch((err) =>
+    logger.warn({ err }, "Initial secondary admin password load failed; using fallback"),
+  ),
+  loadTertiaryPassword().catch((err) =>
+    logger.warn({ err }, "Initial third admin password load failed; using fallback"),
+  ),
+])
   .finally(() => {
     app.listen(port, (err) => {
       if (err) {

@@ -17,26 +17,41 @@ function requireEnv(name: string): string {
 
 export const PRIMARY_USERNAME = requireEnv("ADMIN_USERNAME");
 export const SECONDARY_USERNAME = requireEnv("ADMIN_USERNAME_2");
+export const TERTIARY_USERNAME = requireEnv("ADMIN_USERNAME_3");
 
 const primaryPassword = requireEnv("ADMIN_PASSWORD");
 const envSecondaryPassword = requireEnv("ADMIN_PASSWORD_2");
+const envTertiaryPassword = requireEnv("ADMIN_PASSWORD_3");
 
 export function getPrimaryPassword(): string {
   return primaryPassword;
 }
 
 let cachedSecondary: string | null = null;
+let cachedTertiary: string | null = null;
 
 function fallbackSecondary(): string {
   return envSecondaryPassword;
+}
+
+function fallbackTertiary(): string {
+  return envTertiaryPassword;
 }
 
 export function getSecondaryPasswordSync(): string {
   return cachedSecondary ?? fallbackSecondary();
 }
 
+export function getTertiaryPasswordSync(): string {
+  return cachedTertiary ?? fallbackTertiary();
+}
+
 export function setSecondaryPasswordCache(pw: string): void {
   cachedSecondary = pw;
+}
+
+export function setTertiaryPasswordCache(pw: string): void {
+  cachedTertiary = pw;
 }
 
 export async function loadSecondaryPassword(): Promise<string> {
@@ -51,6 +66,20 @@ export async function loadSecondaryPassword(): Promise<string> {
     cachedSecondary = fallbackSecondary();
   }
   return cachedSecondary;
+}
+
+export async function loadTertiaryPassword(): Promise<string> {
+  try {
+    const rows = await db
+      .select({ adminPassword3: siteSettingsTable.adminPassword3 })
+      .from(siteSettingsTable)
+      .limit(1);
+    const dbVal = rows[0]?.adminPassword3;
+    cachedTertiary = dbVal && dbVal.trim() ? dbVal : fallbackTertiary();
+  } catch {
+    cachedTertiary = fallbackTertiary();
+  }
+  return cachedTertiary;
 }
 
 export async function persistSecondaryPassword(newPw: string): Promise<void> {
@@ -68,7 +97,22 @@ export async function persistSecondaryPassword(newPw: string): Promise<void> {
   setSecondaryPasswordCache(trimmed);
 }
 
-export type AdminRole = "primary" | "secondary";
+export async function persistTertiaryPassword(newPw: string): Promise<void> {
+  const trimmed = newPw.trim();
+  if (!trimmed) throw new Error("Third admin password cannot be empty.");
+  const rows = await db.select({ id: siteSettingsTable.id }).from(siteSettingsTable).limit(1);
+  if (rows.length === 0) {
+    await db.insert(siteSettingsTable).values({ adminPassword3: trimmed });
+  } else {
+    await db
+      .update(siteSettingsTable)
+      .set({ adminPassword3: trimmed, updatedAt: new Date() })
+      .where(eq(siteSettingsTable.id, rows[0]!.id));
+  }
+  setTertiaryPasswordCache(trimmed);
+}
+
+export type AdminRole = "primary" | "secondary" | "tertiary";
 
 type HeaderBag = Record<string, string | string[] | undefined> | Record<string, unknown>;
 
@@ -81,10 +125,11 @@ function headerStr(headers: HeaderBag, key: string): string {
 
 /**
  * Resolve the admin role from request headers. Validates the username/password
- * pair: a primary username paired with the secondary password (or vice versa)
- * is rejected. Username header is optional — if absent, the password is matched
- * against either credential set so existing tooling (curl scripts, internal
- * jobs) keeps working until they're updated to send `x-admin-username`.
+ * pair: a username paired with a mismatched role's password is rejected.
+ * Username header is optional — if absent, the password is matched against
+ * any of the three credential sets so existing tooling (curl scripts,
+ * internal jobs) keeps working until they're updated to send
+ * `x-admin-username`.
  */
 export function adminRoleFromHeaders(headers: HeaderBag): AdminRole | null {
   const u = headerStr(headers, "x-admin-username").trim();
@@ -92,13 +137,16 @@ export function adminRoleFromHeaders(headers: HeaderBag): AdminRole | null {
   if (!p) return null;
   const primaryPw = getPrimaryPassword();
   const secondaryPw = getSecondaryPasswordSync();
+  const tertiaryPw = getTertiaryPasswordSync();
   if (u === "") {
     if (p === primaryPw) return "primary";
     if (p === secondaryPw) return "secondary";
+    if (p === tertiaryPw) return "tertiary";
     return null;
   }
   if (u === PRIMARY_USERNAME && p === primaryPw) return "primary";
   if (u === SECONDARY_USERNAME && p === secondaryPw) return "secondary";
+  if (u === TERTIARY_USERNAME && p === tertiaryPw) return "tertiary";
   return null;
 }
 
