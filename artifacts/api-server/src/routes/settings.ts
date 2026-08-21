@@ -8,6 +8,9 @@ import {
   getSecondaryPasswordSync,
   persistSecondaryPassword,
   SECONDARY_USERNAME,
+  getTertiaryPasswordSync,
+  persistTertiaryPassword,
+  TERTIARY_USERNAME,
 } from "../lib/admin-auth";
 
 const router = Router();
@@ -53,6 +56,35 @@ router.put("/admin/secondary", async (req, res) => {
   } catch (err) {
     req.log.error(err);
     res.status(500).json({ error: "Failed to update secondary admin password" });
+  }
+});
+
+// PRIMARY-ADMIN ONLY: view + update the third admin password, same pattern as secondary.
+router.get("/admin/tertiary", (req, res) => {
+  if (!isPrimaryReq(req.headers)) {
+    res.status(403).json({ error: "Primary admin only" });
+    return;
+  }
+  res.json({ username: TERTIARY_USERNAME, password: getTertiaryPasswordSync() });
+});
+
+router.put("/admin/tertiary", async (req, res) => {
+  if (!isPrimaryReq(req.headers)) {
+    res.status(403).json({ error: "Primary admin only" });
+    return;
+  }
+  const body = req.body as Record<string, unknown>;
+  const newPw = typeof body.password === "string" ? body.password.trim() : "";
+  if (newPw.length < 6) {
+    res.status(400).json({ error: "Password must be at least 6 characters." });
+    return;
+  }
+  try {
+    await persistTertiaryPassword(newPw);
+    res.json({ ok: true, username: TERTIARY_USERNAME, password: getTertiaryPasswordSync() });
+  } catch (err) {
+    req.log.error(err);
+    res.status(500).json({ error: "Failed to update third admin password" });
   }
 });
 

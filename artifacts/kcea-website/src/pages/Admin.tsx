@@ -430,13 +430,18 @@ export default function Admin() {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [authed, setAuthed] = useState(false);
-  const [authRole, setAuthRole] = useState<"primary" | "secondary" | null>(null);
+  const [authRole, setAuthRole] = useState<"primary" | "secondary" | "tertiary" | null>(null);
   const [authError, setAuthError] = useState("");
   const [secondaryPwView, setSecondaryPwView] = useState<{ username: string; password: string } | null>(null);
   const [secondaryPwEdit, setSecondaryPwEdit] = useState("");
   const [secondaryPwSaved, setSecondaryPwSaved] = useState(false);
   const [secondaryPwError, setSecondaryPwError] = useState("");
   const [showSecondaryPw, setShowSecondaryPw] = useState(false);
+  const [tertiaryPwView, setTertiaryPwView] = useState<{ username: string; password: string } | null>(null);
+  const [tertiaryPwEdit, setTertiaryPwEdit] = useState("");
+  const [tertiaryPwSaved, setTertiaryPwSaved] = useState(false);
+  const [tertiaryPwError, setTertiaryPwError] = useState("");
+  const [showTertiaryPw, setShowTertiaryPw] = useState(false);
   const [activeTab, setActiveTab] = useState<Tab>("submissions");
 
   // ── Resident detail popup ─────────────────────────────────────────
@@ -529,6 +534,21 @@ export default function Admin() {
         if (!res.ok) return;
         const data = await res.json() as { username: string; password: string };
         if (!cancelled) setSecondaryPwView({ username: data.username, password: data.password });
+      } catch { /* ignore */ }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authed, authRole]);
+
+  useEffect(() => {
+    if (!authed || authRole !== "primary") return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`${BASE}/api/admin/tertiary`, { headers: authHeaders });
+        if (!res.ok) return;
+        const data = await res.json() as { username: string; password: string };
+        if (!cancelled) setTertiaryPwView({ username: data.username, password: data.password });
       } catch { /* ignore */ }
     })();
     return () => { cancelled = true; };
@@ -1773,7 +1793,7 @@ export default function Admin() {
         headers: authHeaders,
       });
       if (res.ok) {
-        const data = await res.json().catch(() => ({})) as { role?: "primary" | "secondary" };
+        const data = await res.json().catch(() => ({})) as { role?: "primary" | "secondary" | "tertiary" };
         setAuthRole(data.role ?? "secondary");
         setAuthed(true);
       } else {
@@ -1979,7 +1999,12 @@ export default function Admin() {
                 Secondary admin
               </span>
             )}
-            <Button variant="outline" size="sm" className="border-border" onClick={() => { setAuthed(false); setPassword(""); setUsername(""); setAuthRole(null); setSecondaryPwView(null); }}>
+            {authRole === "tertiary" && (
+              <span className="hidden sm:inline-flex items-center gap-1 rounded-full border border-purple-500/30 bg-purple-500/10 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-purple-300">
+                Third admin
+              </span>
+            )}
+            <Button variant="outline" size="sm" className="border-border" onClick={() => { setAuthed(false); setPassword(""); setUsername(""); setAuthRole(null); setSecondaryPwView(null); setTertiaryPwView(null); }}>
               Sign Out
             </Button>
           </div>
@@ -4622,6 +4647,89 @@ export default function Admin() {
                       </div>
                       {secondaryPwSaved && <p className="text-xs text-green-400">Secondary admin password updated.</p>}
                       {secondaryPwError && <p className="text-xs text-red-400">{secondaryPwError}</p>}
+                    </div>
+                  </div>
+                )}
+
+                {authRole === "primary" && (
+                  <div className="pt-4 border-t border-border space-y-2">
+                    <Label className="text-sm">Third admin account</Label>
+                    <p className="text-xs text-muted-foreground">
+                      A third admin login with full access (Carina). Username is set by the
+                      <code className="mx-1 px-1 bg-background/60 rounded">ADMIN_USERNAME_3</code>
+                      environment variable (default <code className="px-1 bg-background/60 rounded">kcea-admin3</code>).
+                      Only the primary admin can change this password.
+                    </p>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                      <div className="space-y-1">
+                        <Label className="text-xs text-muted-foreground">Username</Label>
+                        <Input value={tertiaryPwView?.username ?? "kcea-admin3"} readOnly className="bg-background/40 border-border font-mono text-sm" />
+                      </div>
+                      <div className="space-y-1">
+                        <Label className="text-xs text-muted-foreground">Current password</Label>
+                        <div className="flex gap-2">
+                          <Input
+                            value={tertiaryPwView?.password ?? ""}
+                            readOnly
+                            type={showTertiaryPw ? "text" : "password"}
+                            placeholder="••••••••"
+                            className="bg-background/40 border-border font-mono text-sm"
+                          />
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className="border-border whitespace-nowrap"
+                            onClick={() => setShowTertiaryPw(s => !s)}
+                          >
+                            {showTertiaryPw ? "Hide" : "Show"}
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="pt-2 space-y-2">
+                      <Label htmlFor="tertiary-new-pw" className="text-xs text-muted-foreground">Set new password (min 6 characters)</Label>
+                      <div className="flex gap-2">
+                        <Input
+                          id="tertiary-new-pw"
+                          type="text"
+                          value={tertiaryPwEdit}
+                          onChange={e => { setTertiaryPwEdit(e.target.value); setTertiaryPwSaved(false); setTertiaryPwError(""); }}
+                          placeholder="New password for third admin"
+                          className="bg-background border-border font-mono text-sm"
+                        />
+                        <Button
+                          size="sm"
+                          className="bg-primary text-primary-foreground hover:bg-primary/90 gap-1 whitespace-nowrap"
+                          disabled={tertiaryPwEdit.trim().length < 6}
+                          onClick={async () => {
+                            setTertiaryPwError("");
+                            setTertiaryPwSaved(false);
+                            try {
+                              const res = await fetch(`${BASE}/api/admin/tertiary`, {
+                                method: "PUT",
+                                headers: { ...authHeaders, "Content-Type": "application/json" },
+                                body: JSON.stringify({ password: tertiaryPwEdit.trim() }),
+                              });
+                              if (!res.ok) {
+                                const data = await res.json().catch(() => ({})) as { error?: string };
+                                setTertiaryPwError(data.error ?? "Failed to update password.");
+                                return;
+                              }
+                              const data = await res.json() as { username: string; password: string };
+                              setTertiaryPwView({ username: data.username, password: data.password });
+                              setTertiaryPwEdit("");
+                              setTertiaryPwSaved(true);
+                            } catch {
+                              setTertiaryPwError("Could not reach the server.");
+                            }
+                          }}
+                        >
+                          <Save className="h-3.5 w-3.5" /> Update password
+                        </Button>
+                      </div>
+                      {tertiaryPwSaved && <p className="text-xs text-green-400">Third admin password updated.</p>}
+                      {tertiaryPwError && <p className="text-xs text-red-400">{tertiaryPwError}</p>}
                     </div>
                   </div>
                 )}
