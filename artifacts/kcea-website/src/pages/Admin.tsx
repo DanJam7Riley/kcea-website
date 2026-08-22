@@ -249,6 +249,7 @@ function ResidentDetailPanel({
   authHeaders,
   onBack,
   onEdit,
+  onOpenMultiMonth,
   onSaveNotes,
   savingNotes,
   invoiceStatusBadgeClass,
@@ -260,12 +261,52 @@ function ResidentDetailPanel({
   authHeaders: Record<string, string>;
   onBack: () => void;
   onEdit: () => void;
+  onOpenMultiMonth: () => void;
   onSaveNotes: (id: number, notes: string) => void;
   savingNotes: boolean;
   invoiceStatusBadgeClass: (status: string) => string;
 }) {
   const [detailTab, setDetailTab] = useState<"profile" | "account" | "communications" | "notes">("profile");
   const [notesDraft, setNotesDraft] = useState(contact?.notes ?? "");
+
+  // ── Single invoice, generated straight from this profile ─────────────
+  // Reuses the same bulk-generate / onceoff-generate endpoints the bulk
+  // dialogs use, just scoped to this one commitmentId — no need for a
+  // dedicated single-invoice route.
+  const qc = useQueryClient();
+  const [invoiceMonth, setInvoiceMonth] = useState<"current" | "last">("current");
+  const [invoiceFeedback, setInvoiceFeedback] = useState<{ kind: "success" | "error"; text: string } | null>(null);
+
+  const generateSingleInvoice = useMutation({
+    mutationFn: async () => {
+      const isOnceoff = contact?.commitmentType === "onceoff";
+      const body: Record<string, unknown> = { commitmentIds: [residentId] };
+      if (!isOnceoff && invoiceMonth === "last") {
+        const now = new Date();
+        const last = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+        body.month = `${last.getFullYear()}-${String(last.getMonth() + 1).padStart(2, "0")}`;
+      }
+      const r = await fetch(`${BASE}/api/invoices/${isOnceoff ? "onceoff-generate" : "bulk-generate"}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...authHeaders },
+        body: JSON.stringify(body),
+      });
+      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error ?? "Failed to generate invoice");
+      return r.json() as Promise<{ created: string[]; skipped: { commitmentId: number; reason: string }[]; createdCount: number; skippedCount: number }>;
+    },
+    onSuccess: data => {
+      qc.invalidateQueries({ queryKey: ["resident-statement", residentId] });
+      qc.invalidateQueries({ queryKey: ["invoices"] });
+      qc.invalidateQueries({ queryKey: ["invoices-bulk-preview"] });
+      qc.invalidateQueries({ queryKey: ["invoices-onceoff-preview"] });
+      if (data.createdCount === 0) {
+        setInvoiceFeedback({ kind: "error", text: data.skipped[0]?.reason ?? "Skipped — nothing to invoice." });
+      } else {
+        setInvoiceFeedback({ kind: "success", text: `Invoice ${data.created[0]} created.` });
+      }
+    },
+    onError: (err: unknown) => setInvoiceFeedback({ kind: "error", text: err instanceof Error ? err.message : "Failed to generate invoice" }),
+  });
 
   useEffect(() => {
     setNotesDraft(contact?.notes ?? "");
@@ -307,10 +348,53 @@ function ResidentDetailPanel({
               </p>
             </div>
           )}
+          {contact?.commitmentType === "monthly" && (
+            <>
+              <select
+                className="rounded-md border border-input bg-background px-2 py-1.5 text-xs"
+                value={invoiceMonth}
+                onChange={e => setInvoiceMonth(e.target.value as "current" | "last")}
+                data-testid="resident-invoice-month"
+              >
+                <option value="current">This month</option>
+                <option value="last">Last month</option>
+              </select>
+              <Button
+                size="sm"
+                variant="outline"
+                className="gap-1.5"
+                disabled={generateSingleInvoice.isPending}
+                onClick={() => { setInvoiceFeedback(null); generateSingleInvoice.mutate(); }}
+                data-testid="resident-generate-invoice"
+              >
+                <FileText className="h-3.5 w-3.5" /> {generateSingleInvoice.isPending ? "Generating…" : "Generate invoice"}
+              </Button>
+              <Button size="sm" variant="outline" className="gap-1.5" onClick={onOpenMultiMonth} data-testid="resident-multi-month-invoice">
+                <FileText className="h-3.5 w-3.5" /> Multi-month invoice
+              </Button>
+            </>
+          )}
+          {contact?.commitmentType === "onceoff" && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="gap-1.5"
+              disabled={generateSingleInvoice.isPending}
+              onClick={() => { setInvoiceFeedback(null); generateSingleInvoice.mutate(); }}
+              data-testid="resident-generate-invoice"
+            >
+              <FileText className="h-3.5 w-3.5" /> {generateSingleInvoice.isPending ? "Generating…" : "Generate invoice"}
+            </Button>
+          )}
           <Button size="sm" onClick={onEdit} className="gap-1.5"><Pencil className="h-3.5 w-3.5" /> Edit</Button>
         </div>
       </CardHeader>
       <CardContent className="space-y-4">
+        {invoiceFeedback && (
+          <p className={`text-sm ${invoiceFeedback.kind === "success" ? "text-green-400" : "text-red-400"}`} data-testid="resident-invoice-feedback">
+            {invoiceFeedback.text}
+          </p>
+        )}
         <div className="flex gap-1 border-b border-border">
           {tabs.map(t => (
             <button
@@ -2062,6 +2146,10 @@ export default function Admin() {
               authHeaders={authHeaders}
               onBack={() => setViewingResidentId(null)}
               onEdit={() => { if (viewingResidentContact) { openEditCommitment(viewingResidentContact); setViewingResidentId(null); } }}
+              onOpenMultiMonth={() => {
+                if (viewingResidentId !== null) setMultiMonthCommitmentId(String(viewingResidentId));
+                setShowMultiMonth(true);
+              }}
               onSaveNotes={(id, notes) => updateCommitment.mutate({ id, patch: { notes } })}
               savingNotes={updateCommitment.isPending}
               invoiceStatusBadgeClass={invoiceStatusBadgeClass}
