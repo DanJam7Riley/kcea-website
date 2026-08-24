@@ -207,6 +207,23 @@ function TypeBadge({ type }: { type: string }) {
     : <Badge className="bg-blue-500/20 text-blue-400 border-blue-500/20 text-xs" variant="outline">Monthly</Badge>;
 }
 
+// Balance status for the Residents list — mirrors the sign convention used by
+// the resident statement endpoint (positive = owes KCEA, negative = KCEA owes
+// them / in credit). "No invoices" is distinct from "Paid up": a resident with
+// no invoices at all hasn't necessarily settled anything, so don't imply they have.
+function BalanceBadge({ balance, hasInvoices }: { balance: number; hasInvoices: boolean }) {
+  if (!hasInvoices) {
+    return <Badge className="bg-muted text-muted-foreground border-border text-xs w-fit" variant="outline">No invoices</Badge>;
+  }
+  if (balance > 0) {
+    return <Badge className="bg-red-500/20 text-red-400 border-red-500/20 text-xs w-fit" variant="outline">Arrears R{balance.toLocaleString("en-ZA")}</Badge>;
+  }
+  if (balance < 0) {
+    return <Badge className="bg-sky-500/20 text-sky-400 border-sky-500/20 text-xs w-fit" variant="outline">Credit R{Math.abs(balance).toLocaleString("en-ZA")}</Badge>;
+  }
+  return <Badge className="bg-green-500/20 text-green-400 border-green-500/20 text-xs w-fit" variant="outline">Paid up</Badge>;
+}
+
 // ── Resident detail page ─────────────────────────────────────────────
 // Full-width view (not a cramped popup) with four tabs, modelled on
 // Slipstream's swool.io tabbed customer page — Profile / Account /
@@ -770,8 +787,27 @@ export default function Admin() {
         return r.json();
       });
     },
-    enabled: authed && activeTab === "invoices",
+    // Also needed on the Residents (submissions) list for the arrears/paid-up/credit
+    // badge — fetched unfiltered there since invoiceSearch/invoiceStatusFilter only
+    // apply on the Invoices tab, so the query result is reused as-is when switching tabs.
+    enabled: authed && (activeTab === "invoices" || activeTab === "submissions"),
   });
+
+  // Per-resident running balance, derived the same way as the resident statement
+  // endpoint (statement.ts): sum(invoice total) - sum(amountPaid) across all of a
+  // commitment's non-draft, non-cancelled invoices. Positive = owes KCEA, negative =
+  // credit. Draft invoices aren't owed yet; cancelled ones were voided — neither
+  // should count toward what a resident actually owes.
+  const balanceByCommitment = useMemo(() => {
+    const map = new Map<number, number>();
+    for (const inv of invoices) {
+      if (inv.commitmentId == null) continue;
+      if (inv.status === "draft" || inv.status === "cancelled") continue;
+      const owed = inv.total - (inv.amountPaid ?? 0);
+      map.set(inv.commitmentId, (map.get(inv.commitmentId) ?? 0) + owed);
+    }
+    return map;
+  }, [invoices]);
 
   const createInvoice = useMutation({
     mutationFn: () =>
@@ -2302,6 +2338,7 @@ export default function Admin() {
                       </div>
                       <div className="col-span-2 flex flex-col gap-1">
                         <TypeBadge type={c.commitmentType} />
+                        <BalanceBadge balance={balanceByCommitment.get(c.id) ?? 0} hasInvoices={balanceByCommitment.has(c.id)} />
                         {c.imported && (
                           <Badge className="bg-amber-500/20 text-amber-400 border-amber-500/20 text-xs w-fit" variant="outline">Imported</Badge>
                         )}
