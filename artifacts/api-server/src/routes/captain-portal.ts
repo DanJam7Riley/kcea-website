@@ -345,21 +345,23 @@ router.get("/captain/dashboard", async (req, res) => {
     }
 
     // Payment visibility for captains — Janine's request: captains need to see
-    // when a household on their street last paid so they know who to follow up
-    // with, without needing invoice-level admin access. Computed across every
-    // (non-cancelled) invoice for each committed household: "paid" if nothing
-    // is outstanding, "partial" if some but not all is paid, "unpaid" if
-    // nothing has been paid at all, "no invoices" if none exist yet.
+    // when a household on their street last paid, and now (2026-08-24) the same
+    // arrears/paid-up/credit balance admin sees on the Residents list, so the two
+    // views agree instead of captains only seeing a coarse paid/partial/unpaid
+    // status. Balance computed the same way as Admin's BalanceBadge and the
+    // resident statement endpoint: sum(invoice total) - sum(amountPaid) across
+    // all non-draft, non-cancelled invoices. Positive = owes KCEA, negative =
+    // credit. Drafts aren't owed yet; cancelled invoices were voided.
     const paymentStatusByCommitment: Record<
       number,
-      { lastPaymentDate: Date | null; status: "paid" | "partial" | "unpaid" | "no invoices" }
+      { lastPaymentDate: Date | null; balance: number; hasInvoices: boolean }
     > = {};
     if (committed.length > 0) {
       const commitmentIds = committed.map(c => c.id);
       const invoiceRows = await db
         .select({ id: invoicesTable.id, commitmentId: invoicesTable.commitmentId, total: invoicesTable.total })
         .from(invoicesTable)
-        .where(and(inArray(invoicesTable.commitmentId, commitmentIds), sql`${invoicesTable.status} != 'cancelled'`));
+        .where(and(inArray(invoicesTable.commitmentId, commitmentIds), sql`${invoicesTable.status} NOT IN ('cancelled', 'draft')`));
 
       const invoiceIds = invoiceRows.map(r => r.id);
       const paymentRows =
@@ -389,7 +391,7 @@ router.get("/captain/dashboard", async (req, res) => {
       for (const c of committed) {
         const invs = invoicesByCommitment.get(c.id) ?? [];
         if (invs.length === 0) {
-          paymentStatusByCommitment[c.id] = { lastPaymentDate: null, status: "no invoices" };
+          paymentStatusByCommitment[c.id] = { lastPaymentDate: null, balance: 0, hasInvoices: false };
           continue;
         }
         let totalDue = 0;
@@ -401,13 +403,13 @@ router.get("/captain/dashboard", async (req, res) => {
           const last = lastPaymentByInvoice.get(inv.id);
           if (last && (!lastPaymentDate || last > lastPaymentDate)) lastPaymentDate = last;
         }
-        const status = totalPaid <= 0 ? "unpaid" : totalPaid >= totalDue ? "paid" : "partial";
-        paymentStatusByCommitment[c.id] = { lastPaymentDate, status };
+        paymentStatusByCommitment[c.id] = { lastPaymentDate, balance: totalDue - totalPaid, hasInvoices: true };
       }
     }
     const committedWithPaymentStatus = committed.map(c => ({
       ...c,
-      paymentStatus: paymentStatusByCommitment[c.id]?.status ?? "no invoices",
+      balance: paymentStatusByCommitment[c.id]?.balance ?? 0,
+      hasInvoices: paymentStatusByCommitment[c.id]?.hasInvoices ?? false,
       lastPaymentDate: paymentStatusByCommitment[c.id]?.lastPaymentDate ?? null,
     }));
 

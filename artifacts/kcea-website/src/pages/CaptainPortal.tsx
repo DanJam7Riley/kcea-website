@@ -27,22 +27,25 @@ interface CommittedProperty {
   phone: string;
   email: string;
   submittedAt: string;
-  // Derived from invoices/payments — see /api/captain/dashboard.
-  paymentStatus?: "paid" | "partial" | "unpaid" | "no invoices";
+  // Derived from invoices/payments — see /api/captain/dashboard. Mirrors the
+  // admin Residents list's BalanceBadge (same sign convention: positive = owes
+  // KCEA, negative = credit) so captains and admin see the same figures.
+  balance?: number;
+  hasInvoices?: boolean;
   lastPaymentDate?: string | null;
 }
 
-function paymentStatusBadge(status: CommittedProperty["paymentStatus"]) {
-  if (!status || status === "no invoices") {
-    return <Badge variant="outline" className="bg-muted/40 text-muted-foreground border-border text-xs">Not invoiced</Badge>;
+function BalanceBadge({ balance, hasInvoices }: { balance?: number; hasInvoices?: boolean }) {
+  if (!hasInvoices) {
+    return <Badge variant="outline" className="bg-muted/40 text-muted-foreground border-border text-xs">No invoices</Badge>;
   }
-  if (status === "paid") {
-    return <Badge variant="outline" className="bg-green-500/20 text-green-400 border-green-500/20 text-xs">Paid up</Badge>;
+  if ((balance ?? 0) > 0) {
+    return <Badge variant="outline" className="bg-red-500/20 text-red-400 border-red-500/20 text-xs">Arrears R{(balance ?? 0).toLocaleString("en-ZA")}</Badge>;
   }
-  if (status === "partial") {
-    return <Badge variant="outline" className="bg-amber-500/20 text-amber-400 border-amber-500/20 text-xs">Partial</Badge>;
+  if ((balance ?? 0) < 0) {
+    return <Badge variant="outline" className="bg-sky-500/20 text-sky-400 border-sky-500/20 text-xs">Credit R{Math.abs(balance ?? 0).toLocaleString("en-ZA")}</Badge>;
   }
-  return <Badge variant="outline" className="bg-red-500/20 text-red-400 border-red-500/20 text-xs">Unpaid</Badge>;
+  return <Badge variant="outline" className="bg-green-500/20 text-green-400 border-green-500/20 text-xs">Paid up</Badge>;
 }
 
 function ContactDetails({ fullName, street, houseNumber, phone, email, submittedAt }: {
@@ -728,13 +731,13 @@ export default function CaptainPortal() {
                             Paid ✓
                           </Badge>
                         )}
-                        {paymentStatusBadge(c.paymentStatus)}
+                        <BalanceBadge balance={c.balance} hasInvoices={c.hasInvoices} />
                       </div>
                     </div>
                     <p className="text-[11px] text-muted-foreground mt-1">
                       {c.lastPaymentDate
                         ? `Last payment: ${new Date(c.lastPaymentDate).toLocaleDateString("en-ZA", { day: "2-digit", month: "short", year: "numeric" })}`
-                        : c.paymentStatus === "no invoices"
+                        : !c.hasInvoices
                           ? "No invoices yet"
                           : "No payments recorded yet"}
                     </p>
