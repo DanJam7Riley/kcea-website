@@ -11,6 +11,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { computeStreetStatus, getStreetStatusClass, STREET_OPTIONS } from "@/lib/streets";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
@@ -560,6 +561,8 @@ export default function Admin() {
     enabled: authed && viewingResidentId !== null,
   });
   const [search, setSearch] = useState("");
+  const [streetFilter, setStreetFilter] = useState("all");
+  const [balanceFilter, setBalanceFilter] = useState<"all" | "no-invoices" | "arrears" | "paid-up" | "credit">("all");
 
   const [statsSaved, setStatsSaved] = useState(false);
   const [statsForm, setStatsForm] = useState<Partial<SiteStats>>({});
@@ -2024,9 +2027,33 @@ export default function Admin() {
     }
   };
 
+  // Streets present in the current data, alphabetised, for the street filter dropdown.
+  const streetOptions = useMemo(() => {
+    const set = new Set<string>();
+    for (const c of commitments) {
+      const s = (c.street ?? "").trim();
+      if (s) set.add(s);
+    }
+    return [...set].sort((a, b) => a.localeCompare(b));
+  }, [commitments]);
+
   const filtered = commitments.filter(c => {
     const q = search.toLowerCase();
-    return !q || [c.fullName, c.email, c.street, c.phone].some(v => v.toLowerCase().includes(q));
+    const matchesSearch = !q || [c.fullName, c.email, c.street, c.phone].some(v => v.toLowerCase().includes(q));
+    if (!matchesSearch) return false;
+
+    if (streetFilter !== "all" && (c.street ?? "").trim() !== streetFilter) return false;
+
+    if (balanceFilter !== "all") {
+      const hasInvoices = balanceByCommitment.has(c.id);
+      const balance = balanceByCommitment.get(c.id) ?? 0;
+      if (balanceFilter === "no-invoices" && hasInvoices) return false;
+      if (balanceFilter === "arrears" && !(hasInvoices && balance > 0)) return false;
+      if (balanceFilter === "paid-up" && !(hasInvoices && balance === 0)) return false;
+      if (balanceFilter === "credit" && !(hasInvoices && balance < 0)) return false;
+    }
+
+    return true;
   });
 
   const monthlyCount = commitments.filter(c => c.commitmentType === "monthly").length;
@@ -2307,14 +2334,39 @@ export default function Admin() {
                   <button onClick={() => setImportError("")} className="ml-auto text-muted-foreground hover:text-foreground text-lg leading-none">×</button>
                 </div>
               )}
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                <Input
-                  placeholder="Search by name, email, street…"
-                  value={search}
-                  onChange={e => setSearch(e.target.value)}
-                  className="pl-9 bg-background border-border"
-                />
+              <div className="flex flex-col sm:flex-row gap-2">
+                <div className="relative flex-1">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    placeholder="Search by name, email, street…"
+                    value={search}
+                    onChange={e => setSearch(e.target.value)}
+                    className="pl-9 bg-background border-border"
+                  />
+                </div>
+                <Select value={streetFilter} onValueChange={setStreetFilter}>
+                  <SelectTrigger className="w-full sm:w-[180px] bg-background border-border">
+                    <SelectValue placeholder="All streets" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All streets</SelectItem>
+                    {streetOptions.map(s => (
+                      <SelectItem key={s} value={s}>{s}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Select value={balanceFilter} onValueChange={v => setBalanceFilter(v as typeof balanceFilter)}>
+                  <SelectTrigger className="w-full sm:w-[160px] bg-background border-border">
+                    <SelectValue placeholder="All balances" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All balances</SelectItem>
+                    <SelectItem value="arrears">Arrears</SelectItem>
+                    <SelectItem value="paid-up">Paid up</SelectItem>
+                    <SelectItem value="credit">Credit</SelectItem>
+                    <SelectItem value="no-invoices">No invoices</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
 
               {commitmentsLoading ? (
@@ -2323,7 +2375,9 @@ export default function Admin() {
                 <div className="text-center py-12 space-y-2">
                   <ClipboardList className="h-10 w-10 text-muted-foreground/40 mx-auto" />
                   <p className="text-muted-foreground text-sm">
-                    {search ? "No results match your search." : "No submissions yet. They'll appear here when residents complete the form."}
+                    {search || streetFilter !== "all" || balanceFilter !== "all"
+                      ? "No results match your filters."
+                      : "No submissions yet. They'll appear here when residents complete the form."}
                   </p>
                 </div>
               ) : (
