@@ -11,7 +11,7 @@
 // indefinitely, the same way a real bank statement link would).
 import { Router } from "express";
 import { db, commitmentsTable, invoicesTable, invoiceLineItemsTable, paymentsTable } from "@workspace/db";
-import { eq } from "drizzle-orm";
+import { eq, and, isNull } from "drizzle-orm";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { isAdminReq } from "../lib/admin-auth";
 
@@ -102,6 +102,20 @@ router.get("/commitments/:id/statement", async (req, res) => {
         payments: paymentsByInvoice.get(inv.id) ?? [],
       };
     });
+    // Unapplied credit — money allocated directly to this household (not a
+    // specific invoice), e.g. via the bank transactions ledger's "Allocate
+    // to household" action when there's no open invoice yet. Counts toward
+    // the household's overall position immediately (so it shows as credit
+    // here even before an invoice exists to apply it to), and auto-connects
+    // to the next invoice generated for them (see applyAvailableCredit in
+    // invoices.ts) rather than staying stranded.
+    const unappliedCredits = await db
+      .select()
+      .from(paymentsTable)
+      .where(and(eq(paymentsTable.commitmentId, id), isNull(paymentsTable.invoiceId)));
+    const unappliedCreditTotal = unappliedCredits.reduce((s, c) => s + c.amount, 0);
+    totalPaidOverall += unappliedCreditTotal;
+
     // Positive = owes KCEA; negative = KCEA owes them (in credit).
     const totalOutstanding = totalInvoiced - totalPaidOverall;
 
@@ -114,6 +128,13 @@ router.get("/commitments/:id/statement", async (req, res) => {
         commitmentType: commitment.commitmentType,
       },
       invoices: statementInvoices,
+      unappliedCredits: unappliedCredits.map(c => ({
+        id: c.id,
+        amount: c.amount,
+        paymentDate: c.paymentDate,
+        method: c.method,
+        reference: c.reference,
+      })),
       totalOutstanding,
       invoiceCount: invoiceIds.length,
     });

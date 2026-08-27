@@ -239,11 +239,16 @@ export type InvoiceLineItem = typeof invoiceLineItemsTable.$inferSelect;
 // "source" distinguishes a payment typed in by hand from one created by
 // confirming a matched row in a bank-statement CSV import, for audit
 // purposes — both write identical rows otherwise.
+// invoiceId is nullable: a payment allocated directly to a household (not a
+// specific invoice) — "credit" — has invoiceId null and commitmentId set
+// instead. Added 2026-08-18 so an admin can allocate a bank transaction to a
+// resident when there's no open invoice to attach it to yet, and have it
+// auto-apply the next time an invoice is generated for that household (see
+// applyAvailableCredit in invoices.ts) instead of sitting unallocated.
 export const paymentsTable = pgTable("payments", {
   id: serial("id").primaryKey(),
-  invoiceId: integer("invoice_id")
-    .notNull()
-    .references(() => invoicesTable.id, { onDelete: "cascade" }),
+  invoiceId: integer("invoice_id").references(() => invoicesTable.id, { onDelete: "cascade" }),
+  commitmentId: integer("commitment_id").references(() => commitmentsTable.id),
   amount: integer("amount").notNull(),
   paymentDate: timestamp("payment_date").notNull().defaultNow(),
   method: text("method").notNull().default("EFT"),

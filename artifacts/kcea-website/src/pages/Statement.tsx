@@ -34,9 +34,12 @@ interface StatementInvoice {
   payments: StatementPayment[];
 }
 
+interface StatementCredit { id: number; amount: number; paymentDate: string; method: string; reference: string | null }
+
 interface StatementData {
   commitment: { id: number; fullName: string; street: string; houseNumber: string; commitmentType: string };
   invoices: StatementInvoice[];
+  unappliedCredits: StatementCredit[];
   totalOutstanding: number;
   invoiceCount: number;
 }
@@ -149,9 +152,22 @@ export default function Statement() {
                 </CardContent>
               </Card>
 
-              {data.invoices.length === 0 ? (
+              {data.unappliedCredits.length > 0 && (
+                <Card className="bg-green-500/10 border-green-500/30">
+                  <CardContent className="p-4 space-y-1">
+                    <p className="text-xs font-semibold text-green-400 uppercase tracking-wide">
+                      Unapplied credit — {rands(data.unappliedCredits.reduce((s, c) => s + c.amount, 0))}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      Payment received but not yet matched to an invoice — this will automatically apply to your next invoice.
+                    </p>
+                  </CardContent>
+                </Card>
+              )}
+
+              {data.invoices.length === 0 && data.unappliedCredits.length === 0 ? (
                 <p className="text-sm text-muted-foreground text-center py-8">No invoices on record yet.</p>
-              ) : (
+              ) : data.invoices.length === 0 ? null : (
                 <div className="space-y-3">
                   {[...data.invoices].reverse().map(inv => (
                     <Card key={inv.id} className="bg-card border-border">

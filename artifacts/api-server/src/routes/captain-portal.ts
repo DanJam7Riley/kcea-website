@@ -364,13 +364,17 @@ router.get("/captain/dashboard", async (req, res) => {
         .where(and(inArray(invoicesTable.commitmentId, commitmentIds), sql`${invoicesTable.status} NOT IN ('cancelled', 'draft')`));
 
       const invoiceIds = invoiceRows.map(r => r.id);
-      const paymentRows =
+      // The WHERE clause guarantees invoiceId is one of invoiceIds (never
+      // null) here, but the column is nullable now (credit payments — see
+      // the payments table comment), so narrow the type explicitly.
+      const paymentRows = (
         invoiceIds.length > 0
           ? await db
               .select({ invoiceId: paymentsTable.invoiceId, amount: paymentsTable.amount, paymentDate: paymentsTable.paymentDate })
               .from(paymentsTable)
               .where(inArray(paymentsTable.invoiceId, invoiceIds))
-          : [];
+          : []
+      ).filter((p): p is typeof p & { invoiceId: number } => p.invoiceId !== null);
 
       const paidByInvoice = new Map<number, number>();
       const lastPaymentByInvoice = new Map<number, Date>();
