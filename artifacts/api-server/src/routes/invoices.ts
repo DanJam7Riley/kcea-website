@@ -4,6 +4,7 @@ import { eq, desc, sql, and, isNull } from "drizzle-orm";
 import { isAdminReq, adminRoleFromHeaders, PRIMARY_USERNAME, SECONDARY_USERNAME } from "../lib/admin-auth";
 import { sendEmail } from "../lib/email";
 import { buildInvoicePdf } from "../lib/invoice-pdf";
+import { sendInvoiceEmail } from "../lib/invoice-email";
 import { makeStatementToken } from "./statement";
 import { logCommunication } from "./communications";
 
@@ -549,65 +550,9 @@ router.post("/invoices/send-all", async (req, res) => {
       if (sent + failed > 0) {
         await new Promise(r => setTimeout(r, 400));
       }
-      const lineItems = await db.select().from(invoiceLineItemsTable).where(eq(invoiceLineItemsTable.invoiceId, inv.id));
-      const itemsText = lineItems.map(li => `- ${li.description} x${li.quantity}: R${li.amount.toLocaleString("en-ZA")}`).join("\n");
-      const dueDateStr = new Date(inv.dueDate).toLocaleDateString("en-ZA", { day: "numeric", month: "long", year: "numeric" });
-      const reference = [inv.billToHouseNumber, inv.billToStreet].filter(Boolean).join(" ") || inv.billToName;
 
-      const subject = `KCEA invoice ${inv.invoiceNumber}`;
-      const text =
-        `Hi ${inv.billToName},\n\n` +
-        `Here's your KCEA invoice ${inv.invoiceNumber} — a PDF copy is attached.\n\n` +
-        `${itemsText}\n\n` +
-        `Total due: R${inv.total.toLocaleString("en-ZA")}\n` +
-        `Due date: ${dueDateStr}\n\n` +
-        `Banking details:\n` +
-        `Kensington Central Enclosure Association\n` +
-        `FNB Gold Business Account\n` +
-        `Account number: 63213323693\n` +
-        `Branch code: 250655\n` +
-        `Reference: ${reference}\n\n` +
-        `If you've already paid this, please ignore this email.\n\n` +
-        (statementLink(inv.commitmentId)
-          ? `View your full statement (all invoices, payments, and balance) any time: ${statementLink(inv.commitmentId)}\n\n`
-          : "") +
-        `Questions? Contact your street captain, or message KCEA on WhatsApp before paying if anything looks off. ` +
-        `We'll never ask for passwords, card numbers, or bank details by email.\n\n` +
-        `— KCEA`;
-
-      // Build the PDF attachment. If generation fails for any reason, fall
-      // back to sending the plain-text email rather than blocking the whole
-      // invoice on a rendering bug — matches the resilient style of the rest
-      // of this route (a bad invoice shouldn't stall the batch).
-      let attachments: { filename: string; content: string }[] | undefined;
-      try {
-        const pdfBytes = await buildInvoicePdf({
-          invoiceNumber: inv.invoiceNumber,
-          billToName: inv.billToName,
-          billToStreet: inv.billToStreet,
-          billToHouseNumber: inv.billToHouseNumber,
-          invoiceDate: new Date(inv.invoiceDate),
-          dueDate: new Date(inv.dueDate),
-          lineItems: lineItems.map(li => ({
-            description: li.description,
-            quantity: li.quantity,
-            unitAmount: li.unitAmount,
-            amount: li.amount,
-          })),
-          subtotal: inv.subtotal,
-          total: inv.total,
-        });
-        attachments = [{ filename: `${inv.invoiceNumber}.pdf`, content: Buffer.from(pdfBytes).toString("base64") }];
-      } catch (pdfErr) {
-        req.log.warn({ invoiceId: inv.id, err: pdfErr }, "PDF generation failed — sending without attachment");
-      }
-
-      const result = await sendEmail(inv.billToEmail as string, subject, text, attachments);
+      const result = await sendInvoiceEmail(inv.id);
       if (result.ok) {
-        await db.update(invoicesTable).set({ emailSentAt: new Date() }).where(eq(invoicesTable.id, inv.id));
-        if (inv.commitmentId) {
-          await logCommunication({ commitmentId: inv.commitmentId, type: "invoice", subject, recipient: inv.billToEmail as string });
-        }
         sent++;
       } else {
         req.log.warn({ invoiceId: inv.id, reason: result.reason }, "Invoice email failed to send");

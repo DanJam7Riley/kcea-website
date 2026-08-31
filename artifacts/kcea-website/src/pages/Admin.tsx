@@ -58,6 +58,11 @@ interface InvoiceRow {
   notes: string | null;
   createdBy: string | null;
   emailSentAt: string | null;
+  // Real delivery status from Resend's webhook — null means "Resend accepted
+  // the send but no delivery/bounce event has arrived yet" (could mean the
+  // webhook isn't configured, or the event just hasn't landed). Distinct from
+  // emailSentAt, which only ever meant "we asked Resend to send it".
+  deliveryStatus: string | null;
   createdAt: string;
   lineItems?: InvoiceLineItem[];
   amountPaid?: number;
@@ -1264,15 +1269,18 @@ export default function Admin() {
   const [showBulkInvoice, setShowBulkInvoice] = useState(false);
   const [bulkSelected, setBulkSelected] = useState<Set<number>>(new Set());
   const [bulkResult, setBulkResult] = useState<{ createdCount: number; skippedCount: number } | null>(null);
-  // "current" | "last" — lets Ingrid/Janine catch up a month that never got
-  // invoiced, without touching the normal monthly flow's default behaviour.
-  const [bulkMonth, setBulkMonth] = useState<"current" | "last">("current");
+  // "current" | "last" | "next" — "last" lets Ingrid/Janine catch up a month
+  // that never got invoiced; "next" generates ahead of the month starting
+  // (added 2026-08-29, alongside the 25th-of-month auto-run — this manual
+  // option covers running it early/by hand instead of waiting for that).
+  const [bulkMonth, setBulkMonth] = useState<"current" | "last" | "next">("current");
 
-  function monthParamFor(which: "current" | "last"): string | undefined {
+  function monthParamFor(which: "current" | "last" | "next"): string | undefined {
     if (which === "current") return undefined;
     const now = new Date();
-    const last = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-    return `${last.getFullYear()}-${String(last.getMonth() + 1).padStart(2, "0")}`;
+    const offset = which === "last" ? -1 : 1;
+    const target = new Date(now.getFullYear(), now.getMonth() + offset, 1);
+    return `${target.getFullYear()}-${String(target.getMonth() + 1).padStart(2, "0")}`;
   }
 
   const { data: bulkPreviewData, isLoading: bulkPreviewLoading, isError: bulkPreviewIsError, error: bulkPreviewError, refetch: refetchBulkPreview } = useQuery<{ eligible: BulkPreviewRow[]; alreadyInvoicedThisMonth: number }>({
@@ -3604,6 +3612,26 @@ export default function Admin() {
                                 <Mail className="h-3 w-3" /> Emailed
                               </Badge>
                             )}
+                            {inv.deliveryStatus === "bounced" && (
+                              <Badge className="bg-red-500/20 text-red-400 border-red-500/20 text-xs" variant="outline">
+                                Bounced
+                              </Badge>
+                            )}
+                            {inv.deliveryStatus === "complained" && (
+                              <Badge className="bg-red-500/20 text-red-400 border-red-500/20 text-xs" variant="outline">
+                                Marked as spam
+                              </Badge>
+                            )}
+                            {inv.deliveryStatus === "delivered" && (
+                              <Badge className="bg-green-500/20 text-green-400 border-green-500/20 text-xs" variant="outline">
+                                Delivered
+                              </Badge>
+                            )}
+                            {inv.deliveryStatus === "delayed" && (
+                              <Badge className="bg-amber-500/20 text-amber-400 border-amber-500/20 text-xs" variant="outline">
+                                Delivery delayed
+                              </Badge>
+                            )}
                           </div>
                           <div className="text-xs text-muted-foreground flex flex-wrap gap-x-4 gap-y-1">
                             <span>Invoiced {new Date(inv.invoiceDate).toLocaleDateString("en-ZA")}</span>
@@ -3777,6 +3805,15 @@ export default function Admin() {
                       onChange={() => setBulkMonth("last")}
                     />
                     Last month (catch-up)
+                  </label>
+                  <label className="flex items-center gap-1.5 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="bulk-month"
+                      checked={bulkMonth === "next"}
+                      onChange={() => setBulkMonth("next")}
+                    />
+                    Next month
                   </label>
                 </div>
                 {bulkPreviewLoading ? (

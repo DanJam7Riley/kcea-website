@@ -4,6 +4,8 @@ import { eq, desc, sql, and } from "drizzle-orm";
 import { getOrCreateSettings } from "../lib/settings";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { isAdminReq } from "../lib/admin-auth";
+import { resolveMonthRange, createMonthlyInvoice, createOnceoffInvoice } from "../lib/invoice-generation";
+import { sendInvoiceEmail } from "../lib/invoice-email";
 
 const router = Router();
 
@@ -99,6 +101,33 @@ router.post("/commitments", async (req, res) => {
       .insert(commitmentsTable)
       .values({ fullName, email, phone, street, houseNumber, commitmentType, imported: false, paymentConfirmed: false })
       .returning();
+
+    // Auto-invoice + auto-email a new household's first invoice immediately,
+    // per Janine's request (2026-08-29) — only for genuine live public-form
+    // signups (this route), never for CSV-imported historical records
+    // (POST /commitments/import, a separate route, sets imported: true and
+    // is unaffected). Fire-and-forget relative to the response: a failure
+    // here must never block saving the commitment itself, matching the
+    // resilient pattern the notification-routing block below already uses.
+    // Fully automatic, no admin review step, per Janine's explicit choice —
+    // failures land in server logs and (once RESEND_WEBHOOK_SECRET is
+    // configured in Resend's dashboard) the delivery-status webhook.
+    try {
+      const invoice =
+        commitmentType === "monthly"
+          ? await createMonthlyInvoice(created, resolveMonthRange(undefined), "auto:new-signup")
+          : commitmentType === "onceoff"
+            ? await createOnceoffInvoice(created, "auto:new-signup")
+            : null;
+      if (invoice) {
+        const sendResult = await sendInvoiceEmail(invoice.id);
+        if (!sendResult.ok) {
+          req.log.warn({ commitmentId: created.id, invoiceId: invoice.id, reason: sendResult.reason }, "Auto-invoice email failed for new signup");
+        }
+      }
+    } catch (autoInvoiceErr) {
+      req.log.warn({ err: autoInvoiceErr, commitmentId: created.id }, "Auto-invoice generation failed for new signup (commitment saved OK)");
+    }
 
     // Notification routing decision (per product spec):
     //   - Primary target = the Active Captain for this street (their phone).
