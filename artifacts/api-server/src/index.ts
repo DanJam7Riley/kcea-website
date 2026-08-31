@@ -2,6 +2,7 @@ import app from "./app";
 import { logger } from "./lib/logger";
 import { seedIfEmpty } from "./seed";
 import { loadSecondaryPassword, loadTertiaryPassword } from "./lib/admin-auth";
+import { startScheduledInvoicing } from "./lib/scheduled-invoicing";
 
 const rawPort = process.env["PORT"];
 
@@ -38,5 +39,6 @@ void Promise.all([
 
       logger.info({ port }, "Server listening");
       void seedIfEmpty();
+      startScheduledInvoicing();
     });
   });

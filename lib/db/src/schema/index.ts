@@ -97,6 +97,10 @@ export const siteSettingsTable = pgTable("site_settings", {
   notifyWhatsapp: text("notify_whatsapp"),
   adminPassword2: text("admin_password_2"),
   adminPassword3: text("admin_password_3"),
+  // "YYYY-MM" of the target month the 25th-of-month auto-invoice run last
+  // completed for — dedupe guard so a server restart on the 25th (or the
+  // interval firing more than once that day) can't run the batch twice.
+  lastAutoInvoiceRunMonth: text("last_auto_invoice_run_month"),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
 export type SiteSettings = typeof siteSettingsTable.$inferSelect;
@@ -215,6 +219,17 @@ export const invoicesTable = pgTable("invoices", {
   // bulk-generate's "already invoiced this month" check honours this so a
   // multi-month invoice can't be double-billed by the normal monthly run.
   coversMonths: integer("covers_months").notNull().default(1),
+  // Real delivery status from Resend's webhook (delivered/bounced/complained/
+  // delayed), not just "did Resend accept the send request" — emailSentAt
+  // above only ever meant the latter. resendEmailId is Resend's own id for
+  // the send, used to match incoming webhook events back to this invoice.
+  // Both null until the invoice is actually emailed; deliveryStatus stays
+  // null even after sending until Resend's webhook reports something (an
+  // invoice can be legitimately emailed but never receive any webhook event
+  // if the webhook isn't configured yet — null is "unknown", not "failed").
+  resendEmailId: text("resend_email_id"),
+  deliveryStatus: text("delivery_status"), // sent | delivered | bounced | complained | delayed
+  deliveryStatusUpdatedAt: timestamp("delivery_status_updated_at"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });

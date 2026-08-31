@@ -17,6 +17,7 @@ import statementRouter from "./statement";
 import bankTransactionsRouter from "./bank-transactions";
 import communicationsRouter from "./communications";
 import expensesRouter from "./expenses";
+import resendWebhookRouter from "./resend-webhook";
 
 const router: IRouter = Router();
 
@@ -36,6 +37,7 @@ router.use(statementRouter);
 router.use(bankTransactionsRouter);
 router.use(communicationsRouter);
 router.use(expensesRouter);
+router.use(resendWebhookRouter);
 router.use(volunteersRouter);
 router.use(captainPortalRouter);
 
