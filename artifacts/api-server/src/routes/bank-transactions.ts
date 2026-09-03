@@ -21,6 +21,24 @@ import { isAdminReq } from "../lib/admin-auth";
 import { recomputeInvoiceStatus } from "./invoices";
 import { parseCsv, detectColumns, parseAmount, findMatch, duplicateKey, descriptionKey } from "./payments";
 
+// A real duplicate-payment incident (2026-08-26) traced to this route: two
+// bank statement exports of the same underlying transaction had slightly
+// different description text (e.g. "Int-Banking Pmt Frm Mike 87 Derby" vs
+// "Int-Banking Pmt Frm Mike87Derby"), so /bank-transactions/import's
+// description-based dedupe didn't recognise them as the same line and both
+// were saved as separate "unallocated" rows. Allocating each one then
+// created two real payments for the same invoice/amount/day — this route
+// had no duplicate check of its own to catch that. duplicateKey (invoiceId +
+// amount + calendar day) is the same signal the import route already uses;
+// checking it here too closes that gap regardless of how the unallocated
+// row got created.
+async function findDuplicatePayment(invoiceId: number, amount: number, date: Date): Promise<{ id: number } | null> {
+  const key = duplicateKey(invoiceId, amount, date);
+  const existing = await db.select({ id: paymentsTable.id, invoiceId: paymentsTable.invoiceId, amount: paymentsTable.amount, paymentDate: paymentsTable.paymentDate }).from(paymentsTable).where(eq(paymentsTable.invoiceId, invoiceId));
+  const hit = existing.find(p => duplicateKey(p.invoiceId, p.amount, new Date(p.paymentDate)) === key);
+  return hit ? { id: hit.id } : null;
+}
+
 // Remember that this bank description belongs to this household, so future
 // imports of the same payer (recurring EFT/debit order text repeats
 // verbatim) auto-allocate instead of needing a human every time. Upserts —
@@ -317,6 +335,12 @@ router.post("/bank-transactions/:id/allocate", async (req, res) => {
     const paymentDate = typeof body.paymentDate === "string" && body.paymentDate ? new Date(body.paymentDate) : new Date(tx.transactionDate);
     const method = typeof body.method === "string" && body.method.trim() ? body.method.trim() : "EFT";
     const reference = typeof body.reference === "string" ? body.reference.trim() || null : tx.description.slice(0, 500);
+
+    const duplicate = await findDuplicatePayment(invoiceId, amount, isNaN(paymentDate.getTime()) ? new Date() : paymentDate);
+    if (duplicate) {
+      res.status(409).json({ error: "A payment for this invoice, amount, and date already exists — likely the same transaction re-imported under different description text.", existingPaymentId: duplicate.id });
+      return;
+    }
 
     const [payment] = await db
       .insert(paymentsTable)
